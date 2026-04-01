@@ -1,0 +1,28 @@
+/**
+ * 上架跟踪列表：列头与数据行共用同一套列宽，避免两处 scoped 样式漂移导致表头与行错位。
+ * 操作列固定宽度 + 内容靠右，避免 flex:1 撑满时左侧大块空白被误认为「多一列」。
+ */
+.lt-col-img         { width: 105px; min-width: 105px; flex-shrink: 0; }
+.lt-col-info        { width: 260px; min-width: 200px; flex-shrink: 0; }
+.lt-col-status      { width: 88px;  min-width: 80px;  flex-shrink: 0; }
+.lt-col-cat         { width: 130px; min-width: 100px; flex-shrink: 0; }
+.lt-col-scene       { width: 100px; min-width: 80px;  flex-shrink: 0; }
+.lt-col-season      { width: 68px;  min-width: 60px;  flex-shrink: 0; }
+.lt-col-brand       { width: 72px;  min-width: 64px;  flex-shrink: 0; }
+.lt-col-shop        { width: 130px; min-width: 100px; flex-shrink: 0; }
+.lt-col-staff       { width: 92px;  min-width: 84px;  flex-shrink: 0; }
+.lt-col-listing     { width: 72px;  min-width: 64px;  flex-shrink: 0; }
+.lt-col-time        { width: 130px; min-width: 110px; flex-shrink: 0; }
+.lt-col-design      { width: 72px;  min-width: 64px;  flex-shrink: 0; }
+.lt-col-design-time { width: 118px; min-width: 100px; flex-shrink: 0; }
+.lt-col-auth        { width: 118px; min-width: 100px; flex-shrink: 0; }
+.lt-col-ready       { width: 100px; min-width: 88px;  flex-shrink: 0; }
+.lt-col-total       { width: 52px;  min-width: 44px;  flex-shrink: 0; }
+.lt-col-logistics   { width: 114px; min-width: 90px;  flex-shrink: 0; }
+.lt-col-action {
+  width: 72px;
+  min-width: 64px;
+  max-width: 96px;
+  flex: 0 0 auto;
+  align-items: flex-end;
+}
