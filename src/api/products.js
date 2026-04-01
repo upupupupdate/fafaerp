@@ -1,5 +1,10 @@
 import axios from 'axios'
-import { mockFetchProductList, mockCreateProduct, mockFetchProductDetail } from '@/mocks/productMock.js'
+import {
+  mockFetchProductList,
+  mockCreateProduct,
+  mockFetchProductDetail,
+  getMockProductList,
+} from '@/mocks/productMock.js'
 
 const client = axios.create({
   baseURL: '/api',
@@ -8,6 +13,9 @@ const client = axios.create({
 
 /** 为 true 时使用本地假数据（见 .env.development 中 VITE_USE_MOCK） */
 const USE_MOCK = import.meta.env.VITE_USE_MOCK === 'true'
+
+/** 后端不可达（如仅部署前端到 Vercel）时控制台提示 */
+export const OFFLINE_DEMO_LOG = '检测到未连接后端，已自动切换为演示数据模式'
 
 /**
  * @param {'spu'|'sku'} view
@@ -24,8 +32,13 @@ export async function fetchProductList(view, filters = {}) {
       delete params[k]
     }
   })
-  const { data } = await client.get('/products', { params })
-  return data
+  try {
+    const { data } = await client.get('/products', { params })
+    return data
+  } catch {
+    console.warn(OFFLINE_DEMO_LOG)
+    return getMockProductList(view, filters)
+  }
 }
 
 /** @param {Record<string, unknown>} payload */

@@ -5,6 +5,9 @@
 const T0 = '2024-06-01T10:00:00.000Z'
 const T1 = '2025-03-15T08:30:00.000Z'
 
+/** 列表缩略图占位，避免离线演示时裂图 */
+export const DEMO_PLACEHOLDER_IMAGE = 'https://via.placeholder.com/60x60'
+
 function spuRow(id, code, nameCn, nameEn, productType, status, cat, brand, skuCount, createdAt, updatedAt) {
   return {
     id,
@@ -18,6 +21,7 @@ function spuRow(id, code, nameCn, nameEn, productType, status, cat, brand, skuCo
     skuCount,
     createdAt,
     updatedAt,
+    imageUrl: DEMO_PLACEHOLDER_IMAGE,
   }
 }
 
@@ -56,6 +60,7 @@ function skuRow(
     status,
     active,
     spuCreatedAt,
+    imageUrl: DEMO_PLACEHOLDER_IMAGE,
   }
 }
 
