@@ -1,9 +1,18 @@
 <script setup>
 import { ref, computed } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { UploadFilled } from '@element-plus/icons-vue'
 import { useSizeLibraryStore } from '@/features/product/useSizeLibraryStore.js'
+import { downloadSizeLibraryTemplate, parseSizeLibraryXlsx } from '@/features/product/sizeLibraryImport.js'
 
 const { list, add, update, remove } = useSizeLibraryStore()
+
+/** 版型仅三种，与业务约定一致 */
+const FIT_OPTIONS = [
+  { value: '紧身', label: '紧身' },
+  { value: '合身', label: '合身' },
+  { value: '宽松', label: '宽松' },
+]
 
 const keyword = ref('')
 const filtered = computed(() => {
@@ -18,11 +27,13 @@ const filtered = computed(() => {
 
 const dialogVisible = ref(false)
 const editingId = ref(null)
+/** 从列表「复制」打开时为 true，用于弹窗标题与保存提示 */
+const dialogFromCopy = ref(false)
 const form = ref({
   name: '',
   standard: 'US',
   audience: '',
-  fit: '常规',
+  fit: '合身',
   category: '',
   sizes: ['S', 'M', 'L', 'XL', 'XXL', 'XXXL'],
   defaultPrintSize: 'L',
@@ -43,12 +54,13 @@ function ensureSpecValues() {
 }
 
 function openAdd() {
+  dialogFromCopy.value = false
   editingId.value = null
   form.value = {
     name: '',
     standard: 'US',
     audience: '',
-    fit: '常规',
+    fit: '合身',
     category: '',
     sizes: ['S', 'M', 'L', 'XL', 'XXL', 'XXXL'],
     defaultPrintSize: 'L',
@@ -59,8 +71,29 @@ function openAdd() {
 }
 
 function openEdit(row) {
+  dialogFromCopy.value = false
   editingId.value = row.id
   form.value = JSON.parse(JSON.stringify(row))
+  if (!FIT_OPTIONS.some(o => o.value === form.value.fit)) {
+    form.value.fit = '合身'
+  }
+  if (!form.value.specs?.length) {
+    form.value.specs = [{ name: '', method: '', tolerance: '', values: {} }]
+  }
+  ensureSpecValues()
+  dialogVisible.value = true
+}
+
+function openCopy(row) {
+  dialogFromCopy.value = true
+  editingId.value = null
+  const clone = JSON.parse(JSON.stringify(row))
+  delete clone.id
+  clone.name = ''
+  form.value = clone
+  if (!FIT_OPTIONS.some(o => o.value === form.value.fit)) {
+    form.value.fit = '合身'
+  }
   if (!form.value.specs?.length) {
     form.value.specs = [{ name: '', method: '', tolerance: '', values: {} }]
   }
@@ -94,11 +127,12 @@ function saveForm() {
     ElMessage.warning('请至少包含一个尺码')
     return
   }
+  const fitVal = FIT_OPTIONS.some(o => o.value === form.value.fit) ? form.value.fit : '合身'
   const payload = {
     name: form.value.name.trim(),
     standard: form.value.standard,
     audience: form.value.audience?.trim() ?? '',
-    fit: form.value.fit,
+    fit: fitVal,
     category: form.value.category?.trim() ?? '',
     sizes: [...form.value.sizes],
     defaultPrintSize: form.value.defaultPrintSize,
@@ -116,9 +150,10 @@ function saveForm() {
     ElMessage.success('已保存')
   } else {
     add(payload)
-    ElMessage.success('已添加')
+    ElMessage.success(dialogFromCopy.value ? '已复制并添加' : '已添加')
   }
   dialogVisible.value = false
+  dialogFromCopy.value = false
 }
 
 function delRow(row) {
@@ -134,8 +169,79 @@ function sizeInfoText(row) {
   return (row.sizes || []).join(', ')
 }
 
-function placeholderImport() {
-  ElMessage.info('导入可后续对接；当前请使用「添加」维护')
+const importDialogVisible = ref(false)
+const importUploading = ref(false)
+
+function openImportDialog() {
+  importDialogVisible.value = true
+}
+
+function onDownloadTemplate() {
+  downloadSizeLibraryTemplate()
+  ElMessage.success('已开始下载「尺码库导入模板.xlsx」')
+}
+
+function uniqueChartName(base, existingSet) {
+  if (!existingSet.has(base)) return base
+  let i = 1
+  while (existingSet.has(`${base} (导入${i})`)) i += 1
+  return `${base} (导入${i})`
+}
+
+function onImportFileChange(uploadFile) {
+  const raw = uploadFile?.raw
+  if (!raw) return
+  if (!/\.xlsx$/i.test(raw.name)) {
+    ElMessage.warning('请上传 .xlsx 文件')
+    return
+  }
+  importUploading.value = true
+  const reader = new FileReader()
+  reader.onload = e => {
+    try {
+      const { charts, errors, warnings } = parseSizeLibraryXlsx(e.target?.result)
+      if (errors.length && !charts.length) {
+        ElMessage.error(errors.slice(0, 5).join('；') + (errors.length > 5 ? '…' : ''))
+        importUploading.value = false
+        return
+      }
+      const existingNames = new Set(list.value.map(c => c.name))
+      let n = 0
+      for (const ch of charts) {
+        let name = ch.name
+        if (existingNames.has(name)) {
+          const next = uniqueChartName(name, existingNames)
+          warnings.push(`「${name}」与已有表重名，已导入为「${next}」`)
+          name = next
+        }
+        existingNames.add(name)
+        add({ ...ch, name })
+        n += 1
+      }
+      if (warnings.length) {
+        console.warn('[尺码库导入]', warnings)
+      }
+      const msg = `成功导入 ${n} 张尺码表`
+      if (errors.length) {
+        ElMessage.warning(`${msg}；${errors.length} 行数据有误已跳过`)
+      } else {
+        ElMessage.success(msg)
+      }
+      if (warnings.length && !errors.length) {
+        ElMessage.info(warnings.slice(0, 3).join('；') + (warnings.length > 3 ? '…' : ''))
+      }
+      importDialogVisible.value = false
+    } catch (err) {
+      ElMessage.error(err?.message || '导入失败')
+    } finally {
+      importUploading.value = false
+    }
+  }
+  reader.onerror = () => {
+    importUploading.value = false
+    ElMessage.error('读取文件失败')
+  }
+  reader.readAsArrayBuffer(raw)
 }
 </script>
 
@@ -156,7 +262,7 @@ function placeholderImport() {
       <div class="sz-toolbar">
         <el-input v-model="keyword" placeholder="搜索尺码表名称/品类" clearable style="width: 280px" />
         <el-button type="primary" @click="openAdd">添加</el-button>
-        <el-button @click="placeholderImport">导入</el-button>
+        <el-button @click="openImportDialog">导入</el-button>
       </div>
 
       <el-table :data="filtered" border stripe>
@@ -168,17 +274,25 @@ function placeholderImport() {
         <el-table-column label="尺码信息" min-width="220">
           <template #default="{ row }">{{ sizeInfoText(row) }}</template>
         </el-table-column>
-        <el-table-column prop="defaultPrintSize" label="默认打印尺码" width="120" />
-        <el-table-column label="操作" width="160" fixed="right">
+        <el-table-column prop="defaultPrintSize" label="默认打样尺码" width="120" />
+        <el-table-column label="操作" width="220" fixed="right">
           <template #default="{ row }">
             <el-button link type="primary" @click="openEdit(row)">编辑</el-button>
+            <el-button link type="primary" @click="openCopy(row)">复制</el-button>
             <el-button link type="danger" @click="delRow(row)">删除</el-button>
           </template>
         </el-table-column>
       </el-table>
     </div>
 
-    <el-dialog v-model="dialogVisible" :title="editingId ? '编辑尺码表' : '新增尺码表'" width="960px" top="4vh" destroy-on-close>
+    <el-dialog
+      v-model="dialogVisible"
+      :title="editingId ? '编辑尺码表' : dialogFromCopy ? '复制尺码表' : '新增尺码表'"
+      width="960px"
+      top="4vh"
+      destroy-on-close
+      @closed="dialogFromCopy = false"
+    >
       <el-form label-width="110px">
         <div class="form-section-title">尺码信息</div>
         <el-form-item label="尺码表名称" required>
@@ -207,10 +321,9 @@ function placeholderImport() {
         </el-row>
         <el-form-item label="版型">
           <el-radio-group v-model="form.fit">
-            <el-radio value="常规">常规</el-radio>
-            <el-radio value="偏胖">偏胖</el-radio>
-            <el-radio value="合身">合身</el-radio>
-            <el-radio value="修身">修身</el-radio>
+            <el-radio v-for="opt in FIT_OPTIONS" :key="opt.value" :value="opt.value">
+              {{ opt.label }}
+            </el-radio>
           </el-radio-group>
         </el-form-item>
         <el-form-item label="尺码列">
@@ -225,7 +338,7 @@ function placeholderImport() {
             @change="onSizesChange"
           />
         </el-form-item>
-        <el-form-item label="默认打印尺码">
+        <el-form-item label="默认打样尺码">
           <el-select v-model="form.defaultPrintSize" placeholder="选择" style="width: 160px">
             <el-option v-for="s in form.sizes" :key="s" :label="s" :value="s" />
           </el-select>
@@ -263,6 +376,34 @@ function placeholderImport() {
       <template #footer>
         <el-button @click="dialogVisible = false">取消</el-button>
         <el-button type="primary" @click="saveForm">保存</el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog v-model="importDialogVisible" title="导入尺码库" width="520px" destroy-on-close>
+      <div class="sz-import-body">
+        <p class="sz-import-lead">请先下载模板，按「尺码明细」表格式填写；支持同一文件内多张尺码表（不同「尺码表名称」）。</p>
+        <el-button type="primary" plain class="sz-import-btn" @click="onDownloadTemplate">
+          下载导入模板（.xlsx）
+        </el-button>
+        <el-upload
+          class="sz-import-upload"
+          drag
+          :auto-upload="false"
+          :show-file-list="true"
+          :limit="1"
+          accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+          :disabled="importUploading"
+          @change="onImportFileChange"
+        >
+          <el-icon class="sz-import-icon"><UploadFilled /></el-icon>
+          <div class="el-upload__text">将填写好的 .xlsx 拖到此处，或 <em>点击选择</em></div>
+          <template #tip>
+            <p class="sz-import-tip">仅支持 .xlsx；导入后写入本地尺码库（与「添加」一致）</p>
+          </template>
+        </el-upload>
+      </div>
+      <template #footer>
+        <el-button @click="importDialogVisible = false">关闭</el-button>
       </template>
     </el-dialog>
   </div>
@@ -320,5 +461,34 @@ function placeholderImport() {
   font-weight: 600;
   color: #64748b;
   white-space: nowrap;
+}
+.sz-import-body {
+  padding: 4px 0 8px;
+}
+.sz-import-lead {
+  font-size: 13px;
+  color: #4b5563;
+  line-height: 1.6;
+  margin: 0 0 14px;
+}
+.sz-import-btn {
+  margin-bottom: 16px;
+}
+.sz-import-upload {
+  width: 100%;
+}
+.sz-import-upload :deep(.el-upload-dragger) {
+  padding: 24px 16px;
+}
+.sz-import-icon {
+  font-size: 40px;
+  color: #94a3b8;
+  margin-bottom: 8px;
+}
+.sz-import-tip {
+  font-size: 12px;
+  color: #9ca3af;
+  margin-top: 8px;
+  line-height: 1.5;
 }
 </style>

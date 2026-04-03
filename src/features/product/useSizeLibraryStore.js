@@ -5,13 +5,21 @@ import { ref, watch, computed } from 'vue'
 
 const LS_KEY = 'product_size_charts'
 
+/** 版型仅允许：紧身、合身、宽松（与尺码库表单、导入一致） */
+const FIT_VALUES = new Set(['紧身', '合身', '宽松'])
+
+function normalizeFit(fit) {
+  if (fit != null && FIT_VALUES.has(String(fit))) return String(fit)
+  return '合身'
+}
+
 const DEFAULT_CHARTS = [
   {
     id: 'sz_demo_1',
     name: '夏季男士常规T恤',
     standard: 'US',
     audience: '男士',
-    fit: '常规',
+    fit: '合身',
     category: '短袖上衣',
     sizes: ['S', 'M', 'L', 'XL', 'XXL', 'XXXL'],
     defaultPrintSize: 'L',
@@ -29,6 +37,7 @@ function normalizeChart(c, idx = 0) {
     next.id = `sz_${Date.now()}_${idx}`
   }
   if (!Array.isArray(next.sizes)) next.sizes = []
+  next.fit = normalizeFit(next.fit)
   return next
 }
 
