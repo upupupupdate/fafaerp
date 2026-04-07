@@ -1,4 +1,6 @@
 <script setup>
+import { computed } from 'vue'
+import { useRouter } from 'vue-router'
 import '@/features/product/npdApparelTableColumns.css'
 import ListingTimeline from '@/features/listing/components/ListingTimeline.vue'
 import {
@@ -7,13 +9,18 @@ import {
   npdNoLabel,
   fitLabel,
 } from '@/features/product/npdApparelDefs.js'
+import { useNpdApparelStore } from '@/features/product/useNpdApparelStore.js'
+import { launchSeasonLabel } from '@/features/product/npdApparelRowFields.js'
+
+const router = useRouter()
+const npdStore = useNpdApparelStore()
 
 const props = defineProps({
   row: { type: Object, required: true },
   selected: { type: Boolean, default: false },
 })
 
-const emit = defineEmits(['update:selected'])
+const emit = defineEmits(['update:selected', 'edit'])
 
 function toggleSel(val) {
   emit('update:selected', val)
@@ -27,6 +34,38 @@ const phaseType = {
   completed: 'success',
   rejected: 'danger',
   void: 'info',
+}
+
+const audienceLabel = computed(() => props.row.audience || props.row.gender || '—')
+
+const shelfLine = computed(() => {
+  const y = props.row.shelfYear || '—'
+  const s = props.row.launchSeason ? launchSeasonLabel(props.row.launchSeason) : '—'
+  return `${y} / ${s}`
+})
+
+const dictSummary = computed(() =>
+  [props.row.fabricType, props.row.craftDict, props.row.designPoint].filter(Boolean).join(' · ') || '—',
+)
+
+const targetLabel = computed(() => {
+  const t = props.row.targetCost ?? props.row.targetPrice
+  return t === '' || t == null ? '—' : t
+})
+
+const compImg = computed(() => props.row.competitorImages?.[0] || props.row.refImageUrl)
+const compLink = computed(() => props.row.competitorLinks?.[0] || props.row.refLink)
+
+function onSubmitStyleOpening() {
+  npdStore.submitStyleOpening(props.row.id)
+}
+
+function goSampleBoard() {
+  router.push({ path: '/product/sample-board', query: { highlight: props.row.id } })
+}
+
+function onEdit() {
+  emit('edit', props.row.id)
 }
 </script>
 
@@ -54,33 +93,42 @@ const phaseType = {
 
       <div class="npd-col-info anpr-cell">
         <div class="anpr-name" :title="row.nameCn">{{ row.nameCn }}</div>
-        <div class="anpr-sub">SPU: {{ row.spu }}</div>
+        <div v-if="row.designNo" class="anpr-sub mono">设计号 {{ row.designNo }}</div>
+        <div class="anpr-sub">SPU: {{ row.spu || '—' }}</div>
         <div v-if="row.tags?.length" class="anpr-tags">
           <el-tag v-for="t in row.tags" :key="t" size="small" effect="plain" class="anpr-tag">{{ t }}</el-tag>
         </div>
       </div>
 
-      <div class="npd-col-cat anpr-cell anpr-cell-muted">{{ row.category }}</div>
-      <div class="npd-col-brand anpr-cell">{{ row.brand }}</div>
-      <div class="npd-col-season anpr-cell anpr-cell-muted">{{ row.season }}</div>
-      <div class="npd-col-forecast anpr-cell">{{ row.forecastSales ?? '—' }}</div>
-      <div class="npd-col-market anpr-cell">{{ row.market }}</div>
-
-      <div class="npd-col-staff anpr-cell">
-        <div class="anpr-staff"><span class="anpr-role">开发</span>{{ row.staff?.dev ?? '—' }}</div>
-        <div class="anpr-staff"><span class="anpr-role">工艺</span>{{ row.staff?.craft ?? '—' }}</div>
-        <div class="anpr-staff"><span class="anpr-role">版师</span>{{ row.staff?.pattern ?? '—' }}</div>
+      <div class="npd-col-cat anpr-cell anpr-cell-muted">{{ row.category || '—' }}</div>
+      <div class="npd-col-brand anpr-cell">{{ row.brand || '—' }}</div>
+      <div class="npd-col-shelf anpr-cell anpr-cell-muted">
+        <span class="anpr-clamp" :title="shelfLine">{{ shelfLine }}</span>
+      </div>
+      <div class="npd-col-scene anpr-cell">{{ row.scene || '—' }}</div>
+      <div class="npd-col-audience anpr-cell">{{ audienceLabel }}</div>
+      <div class="npd-col-market anpr-cell">{{ row.market || '—' }}</div>
+      <div class="npd-col-target anpr-cell">{{ targetLabel }}</div>
+      <div class="npd-col-dict anpr-cell anpr-cell-muted">
+        <span class="anpr-clamp" :title="dictSummary">{{ dictSummary }}</span>
       </div>
 
-      <div class="npd-col-refimg anpr-cell">
+      <div class="npd-col-staff anpr-cell">
+        <div class="anpr-staff"><span class="anpr-role">开发</span>{{ row.staff?.dev || '—' }}</div>
+        <div class="anpr-staff"><span class="anpr-role">工艺</span>{{ row.staff?.craft || '—' }}</div>
+        <div class="anpr-staff"><span class="anpr-role">运营</span>{{ row.staff?.ops || '—' }}</div>
+        <div class="anpr-staff"><span class="anpr-role">版师</span>{{ row.staff?.pattern || '—' }}</div>
+      </div>
+
+      <div class="npd-col-compimg anpr-cell">
         <div class="anpr-thumb sm">
-          <img v-if="row.refImageUrl" :src="row.refImageUrl" alt="" />
+          <img v-if="compImg" :src="compImg" alt="" />
           <span v-else class="anpr-thumb-empty">📷</span>
         </div>
       </div>
 
-      <div class="npd-col-reflink anpr-cell">
-        <a v-if="row.refLink" :href="row.refLink" class="anpr-link" target="_blank" rel="noopener" :title="row.refLink">链接</a>
+      <div class="npd-col-complink anpr-cell">
+        <a v-if="compLink" :href="compLink" class="anpr-link" target="_blank" rel="noopener" :title="compLink">链接</a>
         <span v-else class="anpr-muted">—</span>
       </div>
 
@@ -121,7 +169,9 @@ const phaseType = {
       </div>
 
       <div class="npd-col-action anpr-cell">
-        <span class="anpr-action">编辑</span>
+        <span v-if="row.workflowPhase === 'pending_style'" class="anpr-action primary" @click="onSubmitStyleOpening">提交开款</span>
+        <span v-if="row.workflowPhase === 'sampling'" class="anpr-action" @click="goSampleBoard">查看样板</span>
+        <span class="anpr-action" @click="onEdit">编辑</span>
         <span class="anpr-action">提交</span>
         <span class="anpr-action">复制</span>
       </div>
@@ -130,19 +180,31 @@ const phaseType = {
 </template>
 
 <style scoped>
+/* 与上架跟踪 ListingProductRow .lpr-block 一致的卡片面板 */
 .anpr-block {
-  border: 1px solid #f0f2f5;
-  border-radius: 6px;
+  border-radius: 8px;
   background: #fff;
-  margin-bottom: 8px;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.04);
+  margin-bottom: 5px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+  border: 1px solid #eef0f3;
+  transition: box-shadow 0.22s ease, transform 0.18s ease;
   overflow: hidden;
+}
+.anpr-block:hover {
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.1);
+  transform: translateY(-1px);
+  z-index: 2;
+  position: relative;
+}
+.anpr-block:hover :deep(.lts-track-bar) {
+  transform: scaleY(1.25);
 }
 .anpr-field-row {
   display: flex;
   align-items: stretch;
-  padding: 4px 10px 6px;
+  padding: 4px 8px 6px;
   min-width: min-content;
+  border-top: 1px solid #f5f7fa;
 }
 .anpr-cell {
   display: flex;
@@ -198,6 +260,14 @@ const phaseType = {
   font-size: 10.5px;
   color: #9ca3af;
   line-height: 1.35;
+}
+.anpr-sub.mono {
+  font-family: ui-monospace, monospace;
+  font-size: 10px;
+}
+.anpr-action.primary {
+  font-weight: 600;
+  color: #059669;
 }
 .anpr-tags {
   display: flex;

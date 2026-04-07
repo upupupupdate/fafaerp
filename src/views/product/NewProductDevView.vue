@@ -31,7 +31,6 @@ const workflowTabs = [
     </header>
 
     <div class="npd-toolbar">
-      <span class="npd-toolbar-label">开发类型</span>
       <el-radio-group v-model="devCategory" size="default">
         <el-radio-button value="general">综合类</el-radio-button>
         <el-radio-button value="apparel">服装类</el-radio-button>
@@ -47,12 +46,12 @@ const workflowTabs = [
         :label="t.label"
       />
     </el-tabs>
-    <div class="npd-tab-note">
-      当前状态：<strong>{{ workflowTabs.find(x => x.key === workflowTab)?.label }}</strong>
-      · 与下方列表联动筛选（服装类）
-    </div>
     <div class="npd-panel-wrap">
-      <ApparelNpdPanel v-if="devCategory === 'apparel'" :workflow-tab="workflowTab" />
+      <ApparelNpdPanel
+        v-if="devCategory === 'apparel'"
+        :workflow-tab="workflowTab"
+        @update:workflow-tab="workflowTab = $event"
+      />
       <GeneralNpdPanel v-else />
     </div>
   </div>
@@ -73,10 +72,6 @@ const workflowTabs = [
   padding: 12px 20px 0;
   border-bottom: 1px solid #f0f2f5;
 }
-.npd-toolbar-label {
-  font-size: 13px;
-  color: #6b7280;
-}
 .npd-tabs {
   flex: 0 0 auto;
   padding: 0 16px 8px;
@@ -84,12 +79,6 @@ const workflowTabs = [
 /* Tab 内容区无 slot，由下方独立面板渲染 */
 .npd-tabs :deep(.el-tabs__content) {
   display: none;
-}
-.npd-tab-note {
-  padding: 0 16px;
-  font-size: 12px;
-  color: #9ca3af;
-  margin-bottom: 10px;
 }
 .npd-panel-wrap {
   flex: 1;

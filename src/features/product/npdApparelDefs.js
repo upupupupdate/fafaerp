@@ -1,18 +1,40 @@
 /**
  * 新品开发（服装类）— 时间轴节点与版型枚举
- * 时间轴样式复用 ListingTimeline，与上架跟踪列表视觉一致
+ * 时间轴节点与状态机一致（与 NewProductDevView Tab / workflowPhase 对齐，不含「全部」）
+ * rejected / void 不单独占点，进度位置见 npdApparelTimeline.workflowPhaseToTimelineUpIdx
  */
 
+export const NPD_TIMELINE_NODE_COUNT = 5
+
 export const NPD_APPAREL_NODES = [
-  { key: 'draft', label: '草稿期' },
-  { key: 'review', label: '审核' },
-  { key: 'sampling', label: '调样' },
-  { key: 'dev', label: '开发' },
-  { key: 'revision', label: '复版' },
-  { key: 'finalize', label: '定版' },
-  { key: 'enrich', label: '完善信息' },
-  { key: 'done', label: '已完成' },
+  { key: 'draft', label: '草稿箱' },
+  { key: 'pending_review', label: '待审核' },
+  { key: 'pending_style', label: '待开款' },
+  { key: 'sampling', label: '样板中' },
+  { key: 'completed', label: '已完成' },
 ]
+
+/** 状态统计条（与 NewProductDevView Tab 一致，不含「全部」）— 结构与上架跟踪 ListingNodeStatusBar 一致 */
+export const NPD_STATUS_PANELS = [
+  { key: 'draft', label: '草稿箱' },
+  { key: 'pending_review', label: '待审核' },
+  { key: 'pending_style', label: '待开款' },
+  { key: 'sampling', label: '样板中' },
+  { key: 'completed', label: '已完成' },
+  { key: 'rejected', label: '审核驳回' },
+  { key: 'void', label: '作废' },
+]
+
+/** 统计卡片左侧色条（与 workflowPhase 对应） */
+export const NPD_PANEL_ACCENTS = {
+  draft: '#909399',
+  pending_review: '#E6A23C',
+  pending_style: '#409EFF',
+  sampling: '#FA8C16',
+  completed: '#67C23A',
+  rejected: '#F56C6C',
+  void: '#C0C4CC',
+}
 
 /** 版型三选一 */
 export const FIT_OPTIONS = [
@@ -27,13 +49,10 @@ export function fitLabel(value) {
 
 const NPD_EST_LABELS = {
   draft: '预计提交',
-  review: '预计过审',
-  sampling: '预计调样完成',
-  dev: '预计开发完成',
-  revision: '预计复版完成',
-  finalize: '预计定版',
-  enrich: '预计完善',
-  done: '预计结案',
+  pending_review: '预计过审',
+  pending_style: '预计开款',
+  sampling: '预计样板完成',
+  completed: '预计结案',
 }
 
 export function npdEstLabel(key) {

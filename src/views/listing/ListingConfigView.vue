@@ -1,53 +1,156 @@
 <script setup>
 import { ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import * as XLSX from 'xlsx'
 import { useListingConfig } from '@/features/listing/useListingConfig.js'
 
-const { transitions, logistics, DEFAULT_TRANSITIONS, DEFAULT_LOGISTICS } = useListingConfig()
+const {
+  transitions,
+  firstLegInboundRules,
+  DEFAULT_TRANSITIONS,
+  DEFAULT_FIRST_LEG_RULES,
+} = useListingConfig()
 
-// ── 物流方式：新增/编辑弹窗 ───────────────────────────────────────────
-const logisticsDialogVisible = ref(false)
-const logisticsForm = ref({ id: null, name: '', standard: 30, warning: 5, remark: '' })
-const logisticsFormRef = ref(null)
+const firstLegFileRef = ref(null)
 
-const logisticsRules = {
-  name:     [{ required: true, message: '请输入物流方式名称', trigger: 'blur' }],
-  standard: [{ required: true, message: '请输入标准时效天数', trigger: 'blur' }],
-  warning:  [{ required: true, message: '请输入预警提前天数', trigger: 'blur' }],
+function genFirstLegId() {
+  return `fl_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`
 }
 
-function openAddLogistics() {
-  logisticsForm.value = { id: null, name: '', standard: 30, warning: 5, remark: '' }
-  logisticsDialogVisible.value = true
-}
-
-function openEditLogistics(row) {
-  logisticsForm.value = { ...row }
-  logisticsDialogVisible.value = true
-}
-
-function saveLogistics() {
-  logisticsFormRef.value?.validate(valid => {
-    if (!valid) return
-    if (logisticsForm.value.id) {
-      const idx = logistics.value.findIndex(l => l.id === logisticsForm.value.id)
-      if (idx !== -1) logistics.value[idx] = { ...logisticsForm.value }
-    } else {
-      const newId = Date.now()
-      logistics.value.push({ ...logisticsForm.value, id: newId })
-    }
-    logisticsDialogVisible.value = false
-    ElMessage.success('保存成功')
+function addFirstLegRow() {
+  firstLegInboundRules.value.push({
+    id: genFirstLegId(),
+    logisticsName: '',
+    shipCountry: '',
+    destWarehouse: '',
+    standard: 30,
+    warning: 5,
+    remark: '',
   })
 }
 
-function deleteLogistics(row) {
-  ElMessageBox.confirm(`确认删除物流方式「${row.name}」？`, '提示', { type: 'warning' })
+function deleteFirstLegRow(row) {
+  firstLegInboundRules.value = firstLegInboundRules.value.filter((r) => r.id !== row.id)
+}
+
+function resetFirstLegInbound() {
+  ElMessageBox.confirm('恢复默认头程物流时效配置？当前规则与导入数据将丢失。', '提示', { type: 'warning' })
     .then(() => {
-      logistics.value = logistics.value.filter(l => l.id !== row.id)
-      ElMessage.success('已删除')
+      firstLegInboundRules.value = JSON.parse(JSON.stringify(DEFAULT_FIRST_LEG_RULES))
+      ElMessage.success('已恢复默认')
     })
     .catch(() => {})
+}
+
+function downloadFirstLegTemplate() {
+  const ws = XLSX.utils.aoa_to_sheet([
+    ['物流方式', '发货国家', '目的仓', '时效（天）', '预警（天）', '备注'],
+    ['海运', '', '', 45, 7, '国家与目的仓留空=仅物流段'],
+    ['海运', '中国内地', '美东 FBA 仓', 30, 5, ''],
+  ])
+  const wb = XLSX.utils.book_new()
+  XLSX.utils.book_append_sheet(wb, ws, '头程物流时效')
+  XLSX.writeFile(wb, '头程物流时效配置模板.xlsx')
+}
+
+function normHeaderKey(k) {
+  return String(k ?? '')
+    .replace(/\s/g, '')
+    .replace(/（/g, '(')
+    .replace(/）/g, ')')
+}
+
+function parseFirstLegRow(raw) {
+  const keys = Object.keys(raw)
+  const get = (...cands) => {
+    for (const c of cands) {
+      for (const k of keys) {
+        if (normHeaderKey(k) === normHeaderKey(c) || k === c) {
+          const v = raw[k]
+          if (v != null && String(v).trim() !== '') return v
+        }
+      }
+    }
+    return ''
+  }
+  const logisticsName = String(get('物流方式', '物流')).trim()
+  const shipCountry = String(get('发货国家', '国家')).trim()
+  const destWarehouse = String(get('目的仓', '仓库', '目的仓库')).trim()
+  const remark = String(get('备注', '说明')).trim()
+  let standard = Number(get('时效（天）', '时效(天)', '标准时效', '时效', '标准头程时效（天）'))
+  let warning = Number(get('预警（天）', '预警(天)', '预警', '预警提前（天）'))
+  if (!logisticsName) return { error: '物流方式必填' }
+  const hasC = !!shipCountry
+  const hasW = !!destWarehouse
+  if (hasC !== hasW) return { error: '发货国家与目的仓须同时填写或同时留空' }
+  if (!Number.isFinite(standard) || standard < 1) return { error: '时效须为≥1的整数' }
+  if (!Number.isFinite(warning) || warning < 0) warning = Math.min(5, standard - 1)
+  if (warning >= standard) warning = standard - 1
+  return {
+    rule: {
+      id: genFirstLegId(),
+      logisticsName,
+      shipCountry,
+      destWarehouse,
+      standard: Math.floor(standard),
+      warning: Math.floor(warning),
+      remark,
+    },
+  }
+}
+
+function onFirstLegImport(e) {
+  const file = e.target?.files?.[0]
+  e.target.value = ''
+  if (!file) return
+  const reader = new FileReader()
+  reader.onload = () => {
+    try {
+      const data = new Uint8Array(reader.result)
+      const wb = XLSX.read(data, { type: 'array' })
+      const sheet = wb.Sheets[wb.SheetNames[0]]
+      const rows = XLSX.utils.sheet_to_json(sheet, { defval: '' })
+      if (!rows.length) {
+        ElMessage.warning('文件无数据行')
+        return
+      }
+      const merged = new Map()
+      const errors = []
+      rows.forEach((raw, i) => {
+        const rowNum = i + 2
+        if (!raw || !Object.values(raw).some((v) => String(v ?? '').trim() !== '')) return
+        const parsed = parseFirstLegRow(raw)
+        if (parsed.error) {
+          errors.push(`第${rowNum}行：${parsed.error}`)
+          return
+        }
+        const r = parsed.rule
+        const key = `${r.logisticsName}\t${r.shipCountry}\t${r.destWarehouse}`
+        merged.set(key, r)
+      })
+      if (errors.length) {
+        ElMessage.error(errors.slice(0, 5).join('；') + (errors.length > 5 ? `…共${errors.length}条` : ''))
+        return
+      }
+      if (!merged.size) {
+        ElMessage.warning('没有有效规则行')
+        return
+      }
+      const incoming = [...merged.values()]
+      const byKey = new Map(
+        firstLegInboundRules.value.map((r) => [`${r.logisticsName}\t${r.shipCountry}\t${r.destWarehouse}`, r]),
+      )
+      for (const r of incoming) {
+        byKey.set(`${r.logisticsName}\t${r.shipCountry}\t${r.destWarehouse}`, r)
+      }
+      firstLegInboundRules.value = [...byKey.values()]
+      ElMessage.success(`已导入/合并 ${incoming.length} 条头程配置`)
+    } catch (err) {
+      console.error(err)
+      ElMessage.error('解析失败，请检查文件格式')
+    }
+  }
+  reader.readAsArrayBuffer(file)
 }
 
 // ── 恢复默认配置 ──────────────────────────────────────────────────────
@@ -55,15 +158,6 @@ function resetTransitions() {
   ElMessageBox.confirm('恢复默认节点时效配置？当前修改将丢失。', '提示', { type: 'warning' })
     .then(() => {
       transitions.value = JSON.parse(JSON.stringify(DEFAULT_TRANSITIONS))
-      ElMessage.success('已恢复默认配置')
-    })
-    .catch(() => {})
-}
-
-function resetLogistics() {
-  ElMessageBox.confirm('恢复默认物流方式配置？当前修改将丢失。', '提示', { type: 'warning' })
-    .then(() => {
-      logistics.value = JSON.parse(JSON.stringify(DEFAULT_LOGISTICS))
       ElMessage.success('已恢复默认配置')
     })
     .catch(() => {})
@@ -172,7 +266,7 @@ function warnTip(row) {
       </div>
 
       <!-- ═══════════════════════════════════════════
-           区域 2：物流方式头程时效配置
+           区域 2：头程物流时效（统一：两段连线共用一张表）
       ═══════════════════════════════════════════ -->
       <div class="lc-section">
         <div class="lc-section-header">
@@ -181,75 +275,87 @@ function warnTip(row) {
             头程物流时效配置
           </div>
           <div class="lc-section-actions">
-            <el-button size="small" type="primary" @click="openAddLogistics">+ 新增物流方式</el-button>
-            <el-button size="small" @click="resetLogistics">恢复默认</el-button>
+            <el-button size="small" type="primary" @click="addFirstLegRow">+ 新增</el-button>
+            <el-button size="small" @click="downloadFirstLegTemplate">下载模板</el-button>
+            <el-button size="small" @click="firstLegFileRef?.click()">批量导入</el-button>
+            <input
+              ref="firstLegFileRef"
+              type="file"
+              accept=".xlsx,.xls,.csv"
+              class="lc-file-input"
+              @change="onFirstLegImport"
+            >
+            <el-button size="small" @click="resetFirstLegInbound">恢复默认</el-button>
           </div>
         </div>
         <div class="lc-section-desc">
-          不同物流方式对应不同的头程时效（货件待发 → 待入仓）。产品行将根据其所选物流方式匹配对应的标准时效进行预警判断。
+          <b>同一表格</b>维护两段头程：<br>
+          • <b>发货国家、目的仓均留空</b>：作用于时间轴 <b>货件待发 → 待入仓</b>，仅按产品「物流方式」匹配。<br>
+          • <b>三者均填写</b>（物流方式 + 发货国家 + 目的仓）：作用于 <b>待入仓 → 货件入仓（FBA 已接收）</b>；无匹配时回退「节点间标准时效」中的 FBA 货件入仓默认值。<br>
+          支持下载模板、批量导入；产品行字段需与规则文案一致。
         </div>
 
         <el-table
-          :data="logistics"
+          :data="firstLegInboundRules"
           border
           size="small"
           class="lc-table"
+          empty-text="暂无配置，可新增或批量导入"
         >
-          <el-table-column label="物流方式" width="140">
+          <el-table-column label="物流方式" min-width="110">
             <template #default="{ row }">
-              <span class="lc-metric-name">{{ row.name }}</span>
+              <el-input v-model="row.logisticsName" size="small" placeholder="与产品一致" />
             </template>
           </el-table-column>
-
-          <el-table-column label="标准头程时效（天）" width="170" align="center">
+          <el-table-column label="发货国家" min-width="108">
+            <template #default="{ row }">
+              <el-input v-model="row.shipCountry" size="small" placeholder="留空=仅物流段" />
+            </template>
+          </el-table-column>
+          <el-table-column label="目的仓" min-width="120">
+            <template #default="{ row }">
+              <el-input v-model="row.destWarehouse" size="small" placeholder="留空=仅物流段" />
+            </template>
+          </el-table-column>
+          <el-table-column label="标准时效（天）" width="132" align="center">
             <template #default="{ row }">
               <el-input-number
                 v-model="row.standard"
                 :min="1"
-                :max="180"
+                :max="365"
                 size="small"
                 controls-position="right"
-                style="width: 120px"
+                style="width: 118px"
               />
             </template>
           </el-table-column>
-
-          <el-table-column label="预警提前（天）" width="150" align="center">
+          <el-table-column label="预警提前（天）" width="132" align="center">
             <template #default="{ row }">
               <el-input-number
                 v-model="row.warning"
                 :min="0"
-                :max="row.standard - 1"
+                :max="Math.max(0, row.standard - 1)"
                 size="small"
                 controls-position="right"
                 style="width: 110px"
               />
             </template>
           </el-table-column>
-
-          <el-table-column label="备注" min-width="160">
+          <el-table-column label="备注" min-width="120">
             <template #default="{ row }">
-              <el-input
-                v-model="row.remark"
-                size="small"
-                placeholder="选填"
-                clearable
-              />
+              <el-input v-model="row.remark" size="small" placeholder="选填" clearable />
             </template>
           </el-table-column>
-
-          <el-table-column label="预警规则" min-width="200">
+          <el-table-column label="预警规则" min-width="168">
             <template #default="{ row }">
               <span class="lc-ok-tip">
                 剩余 ≤ {{ row.warning }} 天预警；超过 {{ row.standard }} 天超时
               </span>
             </template>
           </el-table-column>
-
-          <el-table-column label="操作" width="120" align="center">
+          <el-table-column label="操作" width="72" align="center" fixed="right">
             <template #default="{ row }">
-              <el-button size="small" type="primary" link @click="openEditLogistics(row)">编辑</el-button>
-              <el-button size="small" type="danger" link @click="deleteLogistics(row)">删除</el-button>
+              <el-button size="small" type="danger" link @click="deleteFirstLegRow(row)">删除</el-button>
             </template>
           </el-table-column>
         </el-table>
@@ -298,52 +404,6 @@ function warnTip(row) {
       </div>
 
     </div>
-
-    <!-- ── 新增/编辑物流方式弹窗 ── -->
-    <el-dialog
-      v-model="logisticsDialogVisible"
-      :title="logisticsForm.id ? '编辑物流方式' : '新增物流方式'"
-      width="440px"
-      destroy-on-close
-    >
-      <el-form
-        ref="logisticsFormRef"
-        :model="logisticsForm"
-        :rules="logisticsRules"
-        label-width="130px"
-        size="small"
-      >
-        <el-form-item label="物流方式名称" prop="name">
-          <el-input v-model="logisticsForm.name" placeholder="如：海运、空运" />
-        </el-form-item>
-        <el-form-item label="标准时效（天）" prop="standard">
-          <el-input-number
-            v-model="logisticsForm.standard"
-            :min="1"
-            :max="180"
-            controls-position="right"
-            style="width: 160px"
-          />
-        </el-form-item>
-        <el-form-item label="预警提前（天）" prop="warning">
-          <el-input-number
-            v-model="logisticsForm.warning"
-            :min="0"
-            :max="logisticsForm.standard - 1"
-            controls-position="right"
-            style="width: 160px"
-          />
-          <span class="lc-form-hint">剩余天数 ≤ 此值时出现橙色预警</span>
-        </el-form-item>
-        <el-form-item label="备注">
-          <el-input v-model="logisticsForm.remark" placeholder="选填" />
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <el-button @click="logisticsDialogVisible = false">取消</el-button>
-        <el-button type="primary" @click="saveLogistics">保存</el-button>
-      </template>
-    </el-dialog>
 
   </div>
 </template>
@@ -413,6 +473,10 @@ function warnTip(row) {
   font-size: 11px;
   color: #9ca3af;
   margin-left: 8px;
+}
+
+.lc-file-input {
+  display: none;
 }
 
 .lc-tip {

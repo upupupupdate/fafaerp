@@ -4,12 +4,12 @@
  */
 import { ref, watch } from 'vue'
 
-const LS_KEY_TRANSITIONS = 'listing_node_transitions'
-const LS_KEY_LOGISTICS    = 'listing_logistics_methods'
+/** v2：11 节点时间轴，含「货件入仓」；与 v1 分段语义不同，换新 key */
+const LS_KEY_TRANSITIONS = 'listing_node_transitions_v2'
+/** 统一头程规则：含「仅物流」行（货件待发→待入仓）与「物流+国家+仓」行（待入仓→货件入仓） */
+const LS_KEY_FIRST_LEG_RULES = 'listing_first_leg_rules_v2'
 
-// ── 节点间时效默认配置 ─────────────────────────────────────────────────
-// fromKey/toKey 对应 timeline 数组的索引（0-based）
-// idx: 连线索引，即「从第 idx-1 个节点 → 第 idx 个节点」的时效
+// idx = 目标节点下标（进入该节点的连线时效，与 timeline 下标一致）
 const DEFAULT_TRANSITIONS = [
   { idx: 1, label: '运营分配时效',   desc: '【运营分配】时间 - 【开发授权】时间',   standard: 2,  warning: 1 },
   { idx: 2, label: '建PL单时效',    desc: '【建PL单】时间 - 【运营分配】时间',     standard: 3,  warning: 1 },
@@ -17,20 +17,44 @@ const DEFAULT_TRANSITIONS = [
   { idx: 4, label: '采购下单时效',  desc: '【采购下单】时间 - 【PL审核通过】时间', standard: 2,  warning: 1 },
   { idx: 5, label: '供应商履约时效', desc: '【备货入库】时间 - 【采购下单】时间',   standard: 20, warning: 5 },
   { idx: 6, label: '建货件时效',    desc: '【建货件】时间 - 【备货入库】时间',     standard: 3,  warning: 1 },
-  { idx: 7, label: '物流响应时效',  desc: '【货代提货】时间 - 【建货件】时间',     standard: 3,  warning: 1 },
-  // idx 8（待入仓→开售）由物流方式动态决定，不在此配置
-  { idx: 8, label: '开售响应时效',  desc: '【开售】时间 - 【可开售时间(取货件到仓与平面完成较晚者)】', standard: 3, warning: 1 },
+  { idx: 7, label: '物流响应时效',  desc: '【待入仓】时间 - 【建货件】时间',       standard: 3,  warning: 1 },
+  // idx 7 仍可由头程表中「仅填物流方式」行覆盖（见 getLogisticsConfig）
+  { idx: 8, label: 'FBA货件入仓时效', desc: '【货件入仓】完成 - 【待入仓】完成',     standard: 3,  warning: 1 },
+  { idx: 9, label: '入仓至可开售',   desc: '【可开售】完成 - 【货件入仓】完成',     standard: 3,  warning: 1 },
+  { idx: 10, label: '开售响应时效',  desc: '【已开售】时间 - 【可开售】完成',       standard: 3,  warning: 1 },
 ]
 
-// ── 物流方式默认配置 ────────────────────────────────────────────────────
-const DEFAULT_LOGISTICS = [
-  { id: 1, name: '海运',   standard: 45, warning: 7,  remark: '适用美线、欧线' },
-  { id: 2, name: '空运',   standard: 10, warning: 3,  remark: '时效优先' },
-  { id: 3, name: '快递',   standard: 7,  warning: 2,  remark: 'UPS/FedEx' },
-  { id: 4, name: '铁路',   standard: 25, warning: 5,  remark: '中欧班列' },
+/**
+ * @typedef {{
+ *   id: string,
+ *   logisticsName: string,
+ *   shipCountry: string,
+ *   destWarehouse: string,
+ *   standard: number,
+ *   warning: number,
+ *   remark?: string
+ * }} FirstLegRule
+ * 发货国家、目的仓均留空：用于「货件待发 → 待入仓」；
+ * 三者均填：用于「待入仓 → 货件入仓（FBA接收）」。
+ */
+
+/** 默认：前 4 条为仅物流；后 2 条为 FBA 入仓细粒度 */
+const DEFAULT_FIRST_LEG_RULES = [
+  { id: 'fl_l_1', logisticsName: '海运', shipCountry: '', destWarehouse: '', standard: 45, warning: 7, remark: '适用美线、欧线' },
+  { id: 'fl_l_2', logisticsName: '空运', shipCountry: '', destWarehouse: '', standard: 10, warning: 3, remark: '时效优先' },
+  { id: 'fl_l_3', logisticsName: '快递', shipCountry: '', destWarehouse: '', standard: 7, warning: 2, remark: 'UPS/FedEx' },
+  { id: 'fl_l_4', logisticsName: '铁路', shipCountry: '', destWarehouse: '', standard: 25, warning: 5, remark: '中欧班列' },
+  { id: 'fl_fba_1', logisticsName: '海运', shipCountry: '中国内地', destWarehouse: '美东 FBA 仓', standard: 30, warning: 5, remark: '' },
+  { id: 'fl_fba_2', logisticsName: '空运', shipCountry: '中国内地', destWarehouse: '美西 FBA 仓', standard: 12, warning: 3, remark: '' },
 ]
 
-function load(key, defaults) {
+function normRuleStr(s) {
+  return String(s ?? '')
+    .trim()
+    .replace(/\s+/g, ' ')
+}
+
+function loadRaw(key, defaults) {
   try {
     const raw = localStorage.getItem(key)
     return raw ? JSON.parse(raw) : JSON.parse(JSON.stringify(defaults))
@@ -39,16 +63,25 @@ function load(key, defaults) {
   }
 }
 
-// 单例模式：模块级 ref，所有调用方共享同一个响应式对象
-const transitions = ref(load(LS_KEY_TRANSITIONS, DEFAULT_TRANSITIONS))
-const logistics   = ref(load(LS_KEY_LOGISTICS,    DEFAULT_LOGISTICS))
+/** 合并缺省 idx，避免升级后 localStorage 缺新节点 */
+function mergeTransitions(parsed) {
+  const byIdx = new Map(parsed.map((t) => [t.idx, t]))
+  for (const d of DEFAULT_TRANSITIONS) {
+    if (!byIdx.has(d.idx)) byIdx.set(d.idx, { ...d })
+  }
+  return [...byIdx.values()].sort((a, b) => a.idx - b.idx)
+}
 
-watch(transitions, v => localStorage.setItem(LS_KEY_TRANSITIONS, JSON.stringify(v)), { deep: true })
-watch(logistics,   v => localStorage.setItem(LS_KEY_LOGISTICS,    JSON.stringify(v)), { deep: true })
+const transitions = ref(mergeTransitions(loadRaw(LS_KEY_TRANSITIONS, DEFAULT_TRANSITIONS)))
+const firstLegInboundRules = ref(loadRaw(LS_KEY_FIRST_LEG_RULES, DEFAULT_FIRST_LEG_RULES))
 
-/**
- * 计算两个时间戳之间的天数差（向上取整）
- */
+watch(transitions, (v) => localStorage.setItem(LS_KEY_TRANSITIONS, JSON.stringify(v)), { deep: true })
+watch(
+  firstLegInboundRules,
+  (v) => localStorage.setItem(LS_KEY_FIRST_LEG_RULES, JSON.stringify(v)),
+  { deep: true },
+)
+
 export function daysBetween(start, end) {
   if (!start || !end) return null
   const diff = new Date(end) - new Date(start)
@@ -56,26 +89,59 @@ export function daysBetween(start, end) {
 }
 
 /**
- * 获取某条连线的时效配置
- * @param {number} transitionIdx  连线索引（等于目标节点在 timeline 数组中的下标）
- * @param {string} logisticsName  物流方式名称（仅 idx=8 即货件待发→待入仓 时使用）
+ * @param {number} transitionIdx 目标节点下标（与 timeline 下标一致）
  */
 export function getTransitionConfig(transitionIdx, logisticsName) {
-  // idx=8 的「待入仓→开售」之前的「货件待发→待入仓」是 idx=7（物流响应）和 idx=8（头程），
-  // 这里统一用 idx 查普通配置，物流时效（货件发出→FBA签收）单独处理
-  const cfg = transitions.value.find(t => t.idx === transitionIdx)
+  const cfg = transitions.value.find((t) => t.idx === transitionIdx)
   return cfg ?? null
 }
 
+/**
+ * 「货件待发 → 待入仓」：匹配头程表中 **发货国家、目的仓均为空** 且物流方式一致的行。
+ * @returns {{ standard: number, warning: number, name?: string, remark?: string } | null}
+ */
 export function getLogisticsConfig(name) {
-  return logistics.value.find(l => l.name === name) ?? null
+  const L = normRuleStr(name)
+  if (!L) return null
+  for (const r of firstLegInboundRules.value) {
+    if (normRuleStr(r.logisticsName) !== L) continue
+    if (normRuleStr(r.shipCountry)) continue
+    if (normRuleStr(r.destWarehouse)) continue
+    const std = Number(r.standard)
+    const warn = Number(r.warning)
+    if (!Number.isFinite(std) || std < 1) continue
+    const w = Number.isFinite(warn) && warn >= 0 ? Math.min(warn, std - 1) : Math.min(1, std - 1)
+    return { name: r.logisticsName, standard: std, warning: w, remark: r.remark || '' }
+  }
+  return null
+}
+
+/**
+ * 「待入仓 → 货件入仓」：按 物流方式 + 发货国家 + 目的仓 精确匹配；无匹配返回 null，回退节点默认 idx:8。
+ */
+export function lookupFirstLegInboundRule(ctx) {
+  const L = normRuleStr(ctx?.logisticsName)
+  const C = normRuleStr(ctx?.shipCountry)
+  const W = normRuleStr(ctx?.destWarehouse)
+  if (!L || !C || !W) return null
+  for (const r of firstLegInboundRules.value) {
+    if (normRuleStr(r.logisticsName) !== L) continue
+    if (normRuleStr(r.shipCountry) !== C) continue
+    if (normRuleStr(r.destWarehouse) !== W) continue
+    const std = Number(r.standard)
+    const warn = Number(r.warning)
+    if (!Number.isFinite(std) || std < 1) continue
+    const w = Number.isFinite(warn) && warn >= 0 ? Math.min(warn, std - 1) : Math.min(1, std - 1)
+    return { standard: std, warning: w }
+  }
+  return null
 }
 
 export function useListingConfig() {
   return {
     transitions,
-    logistics,
+    firstLegInboundRules,
     DEFAULT_TRANSITIONS,
-    DEFAULT_LOGISTICS,
+    DEFAULT_FIRST_LEG_RULES,
   }
 }

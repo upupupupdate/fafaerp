@@ -20,6 +20,12 @@ const routes = [
         meta: { breadcrumb: ['产品', '新品开发'] },
       },
       {
+        path: 'product/sample-board',
+        name: 'SampleManagement',
+        component: () => import('@/views/product/SampleManagementView.vue'),
+        meta: { breadcrumb: ['产品', '样板管理'] },
+      },
+      {
         path: 'product/list',
         name: 'ProductList',
         component: () => import('@/views/product/ProductManagementView.vue'),

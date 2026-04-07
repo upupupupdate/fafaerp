@@ -1,17 +1,21 @@
 <script setup>
-// 备货发货子节点统计面板
-// nodes : STOCKING_PANELS 数组（含货件入仓派生面板）
-// stats : { [nodeKey]: { total, warning, overdue } }，随筛选联动由父组件传入
-// v-model:active : 当前选中的子节点 key（null = 全部）
+import { STOCKING_PANEL_ACCENTS } from '@/features/listing/listingDefs.js'
 
 const props = defineProps({
   nodes: { type: Array, required: true },
   stats: { type: Object, required: true },
+  /** 可选：各节点左侧色条；不传则使用备货发货 STOCKING_PANEL_ACCENTS */
+  accents: { type: Object, default: null },
 })
 const active = defineModel('active', { default: null })
 
 function toggle(key) {
   active.value = active.value === key ? null : key
+}
+
+function accent(key) {
+  const map = props.accents ?? STOCKING_PANEL_ACCENTS
+  return map[key] || '#409EFF'
 }
 </script>
 
@@ -24,21 +28,22 @@ function toggle(key) {
       :class="{ active: active === node.key }"
       @click="toggle(node.key)"
     >
-      <div class="lnsb-label">{{ node.label }}</div>
-      <div class="lnsb-total">{{ stats[node.key]?.total ?? 0 }} 件</div>
-      <!-- 预警行：仅在有预警时显示橙色 -->
-      <div
-        v-if="(stats[node.key]?.warning ?? 0) > 0"
-        class="lnsb-warning"
-      >
-        预警 {{ stats[node.key].warning }} 件
-      </div>
-      <!-- 超时行：始终占位，有超时时变红 -->
-      <div
-        class="lnsb-overdue"
-        :class="{ 'has-overdue': (stats[node.key]?.overdue ?? 0) > 0 }"
-      >
-        超时 {{ stats[node.key]?.overdue ?? 0 }} 件
+      <div class="lnsb-accent" :style="{ background: accent(node.key) }" />
+      <div class="lnsb-inner">
+        <div class="lnsb-title">{{ node.label }}</div>
+        <div class="lnsb-metric">共 {{ stats[node.key]?.total ?? 0 }} 件</div>
+        <div
+          v-if="(stats[node.key]?.warning ?? 0) > 0"
+          class="lnsb-warning"
+        >
+          预警 {{ stats[node.key].warning }} 件
+        </div>
+        <div
+          class="lnsb-overdue"
+          :class="{ 'has-overdue': (stats[node.key]?.overdue ?? 0) > 0 }"
+        >
+          超时 {{ stats[node.key]?.overdue ?? 0 }} 件
+        </div>
       </div>
     </div>
   </div>
@@ -48,27 +53,73 @@ function toggle(key) {
 .lnsb-wrap {
   display: flex;
   gap: 8px;
-  background: #fff;
-  border-bottom: 1px solid #e8ecf0;
-  padding: 8px 16px;
+  background: transparent;
+  padding: 6px 12px;
   flex-shrink: 0;
 }
 .lnsb-card {
   flex: 1;
   min-width: 72px;
-  padding: 5px 6px;
-  border: 1px solid #e8ecf0;
-  border-radius: 6px;
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
+  background: #fff;
+  border-radius: 8px;
+  border: 1px solid #ebeef5;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
   cursor: pointer;
-  text-align: center;
-  transition: all .15s;
-  background: #fafafa;
+  overflow: hidden;
+  transition: box-shadow 0.15s ease, border-color 0.15s ease;
 }
-.lnsb-card:hover  { border-color: #1890ff; background: #e6f4ff; }
-.lnsb-card.active { border-color: #1890ff; background: #e6f4ff; }
-.lnsb-label   { font-size: 10.5px; color: #374151; font-weight: 600; white-space: nowrap; }
-.lnsb-total   { font-size: 14px;   color: #1890ff; font-weight: 700; margin: 2px 0 1px; }
-.lnsb-warning { font-size: 10px;   color: #d97706; font-weight: 600; }
-.lnsb-overdue { font-size: 10px;   color: #9ca3af; }
-.lnsb-overdue.has-overdue { color: #ef4444; font-weight: 600; }
+.lnsb-card:hover {
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+  border-color: #d9ecff;
+}
+.lnsb-card.active {
+  border-color: #409eff;
+  box-shadow: 0 4px 14px rgba(64, 158, 255, 0.2);
+}
+.lnsb-accent {
+  width: 4px;
+  flex-shrink: 0;
+}
+.lnsb-inner {
+  flex: 1;
+  padding: 6px 6px 5px;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+}
+.lnsb-title {
+  font-size: 12px;
+  color: #303133;
+  font-weight: 600;
+  line-height: 1.25;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  width: 100%;
+}
+.lnsb-metric {
+  font-size: 14px;
+  font-weight: 700;
+  color: #409eff;
+  line-height: 1.2;
+}
+.lnsb-warning {
+  font-size: 10px;
+  color: #d97706;
+  font-weight: 600;
+}
+.lnsb-overdue {
+  font-size: 10px;
+  color: #c0c4cc;
+}
+.lnsb-overdue.has-overdue {
+  color: #f56c6c;
+  font-weight: 600;
+}
 </style>

@@ -1,27 +1,30 @@
 /**
- * 新品开发-服装类列表：列宽与上架跟踪列表同理，表头与数据行共用
+ * 新品开发-服装类列表：列宽（表头与数据行共用）
  */
 .npd-col-chk       { width: 44px;  min-width: 44px;  flex-shrink: 0; }
 .npd-col-img       { width: 72px;  min-width: 72px;  flex-shrink: 0; }
-.npd-col-info      { width: 220px; min-width: 180px; flex-shrink: 0; }
-.npd-col-cat       { width: 108px; min-width: 88px;  flex-shrink: 0; }
-.npd-col-brand     { width: 92px;  min-width: 80px;  flex-shrink: 0; }
-.npd-col-season    { width: 92px;  min-width: 80px;  flex-shrink: 0; }
-.npd-col-forecast  { width: 72px;  min-width: 64px;  flex-shrink: 0; }
+.npd-col-info      { width: 200px; min-width: 168px; flex-shrink: 0; }
+.npd-col-cat       { width: 100px; min-width: 88px;  flex-shrink: 0; }
+.npd-col-brand     { width: 88px;  min-width: 72px;  flex-shrink: 0; }
+.npd-col-shelf     { width: 100px; min-width: 88px;  flex-shrink: 0; }
+.npd-col-scene     { width: 72px;  min-width: 64px;  flex-shrink: 0; }
+.npd-col-audience  { width: 72px;  min-width: 64px;  flex-shrink: 0; }
 .npd-col-market    { width: 56px;  min-width: 48px;  flex-shrink: 0; }
-.npd-col-staff     { width: 100px; min-width: 92px;  flex-shrink: 0; }
-.npd-col-refimg    { width: 56px;  min-width: 52px;  flex-shrink: 0; }
-.npd-col-reflink   { width: 120px; min-width: 100px; flex-shrink: 0; }
+.npd-col-target    { width: 72px;  min-width: 64px;  flex-shrink: 0; }
+.npd-col-dict      { width: 140px; min-width: 120px; flex-shrink: 0; }
+.npd-col-staff     { width: 108px; min-width: 100px; flex-shrink: 0; }
+.npd-col-compimg   { width: 52px;  min-width: 48px;  flex-shrink: 0; }
+.npd-col-complink  { width: 100px; min-width: 88px;  flex-shrink: 0; }
 .npd-col-idea      { width: 120px; min-width: 100px; flex-shrink: 0; }
 .npd-col-kw        { width: 100px; min-width: 88px;  flex-shrink: 0; }
-.npd-col-specs     { width: 168px; min-width: 140px; flex-shrink: 0; }
-.npd-col-attrs     { width: 128px; min-width: 112px; flex-shrink: 0; }
+.npd-col-specs     { width: 140px; min-width: 120px; flex-shrink: 0; }
+.npd-col-attrs     { width: 120px; min-width: 104px; flex-shrink: 0; }
 .npd-col-due       { width: 100px; min-width: 92px;  flex-shrink: 0; }
 .npd-col-status    { width: 88px;  min-width: 80px;  flex-shrink: 0; }
 .npd-col-action {
-  width: 100px;
-  min-width: 92px;
-  max-width: 120px;
+  width: 120px;
+  min-width: 108px;
+  max-width: 140px;
   flex: 0 0 auto;
   align-items: flex-end;
 }

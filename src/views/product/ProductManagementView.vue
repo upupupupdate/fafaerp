@@ -3,6 +3,7 @@ import { computed, nextTick, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Download, Plus, Search } from '@element-plus/icons-vue'
 import { createProduct, fetchProductList } from '@/api/products.js'
+import { useSampleProductQueue } from '@/features/product/useSampleProductQueue.js'
 import { downloadProductTemplateXlsx } from '@/utils/productTemplateExport.js'
 import ProductCreateDrawer from '@/components/product/ProductCreateDrawer.vue'
 import SkuCreateDialog from '@/components/product/SkuCreateDialog.vue'
@@ -135,6 +136,65 @@ const TYPE_BADGE = {
 
 const isBundle = computed(() => form.value.productType === 'BUNDLE')
 const useProductMock = import.meta.env.VITE_USE_MOCK === 'true'
+
+const sampleQueue = useSampleProductQueue()
+const pendingSampleSkuCount = computed(() => sampleQueue.queue.value.length)
+
+/** 将样板管理「出版」推送的 SKU 导入当前表格（演示，不落后端） */
+function importSampleSkusToTable() {
+  const skus = sampleQueue.drain()
+  if (!skus.length) {
+    ElMessage.info('暂无待导入 SKU')
+    return
+  }
+  const ts = Date.now()
+  if (viewMode.value === 'sku') {
+    const newRows = skus.map((s, i) => ({
+      skuId: ts + i,
+      skuCode: s.skuCode,
+      skuName: s.skuName,
+      spuCode: s.spuCode,
+      spuNameCn: s.spuNameCn,
+      categoryName: s.categoryName,
+      brandName: s.brandName,
+      productType: 'NORMAL',
+      status: 'ACTIVE',
+      active: true,
+    }))
+    tableData.value = [...newRows, ...tableData.value]
+  } else {
+    const first = skus[0]
+    const spuRow = {
+      id: `spu-import-${ts}`,
+      rowType: 'spu',
+      skuId: ts,
+      spuCode: first.spuCode,
+      spuNameCn: first.spuNameCn,
+      categoryName: first.categoryName,
+      brandName: first.brandName,
+      productType: 'FINISHED',
+      status: 'ACTIVE',
+      skuCount: skus.length,
+      children: skus.map((s, i) => ({
+        id: `sku-import-${ts}-${i}`,
+        rowType: 'sku',
+        skuId: ts + i + 1,
+        skuCode: s.skuCode,
+        skuName: s.skuName,
+        spuCode: s.spuCode,
+        spuNameCn: s.spuNameCn,
+        categoryName: s.categoryName,
+        brandName: s.brandName,
+        variantJson: s.variantJson,
+        productType: 'NORMAL',
+        status: 'ACTIVE',
+        active: true,
+      })),
+    }
+    tableData.value = [spuRow, ...tableData.value]
+  }
+  ElMessage.success(`已导入 ${skus.length} 条 SKU（演示）`)
+}
 
 // SPU/SKU 数量统计
 const spuCount = computed(() => tableData.value.length)
@@ -363,6 +423,19 @@ load()
         <el-button :icon="Download" size="small" @click="downloadProductTemplateXlsx">导出模板</el-button>
       </div>
     </header>
+
+    <el-alert
+      v-if="pendingSampleSkuCount > 0"
+      type="success"
+      show-icon
+      :closable="false"
+      class="pm-sample-alert"
+    >
+      <template #title>
+        样板管理已推送 <strong>{{ pendingSampleSkuCount }}</strong> 条 SKU，可导入到当前列表（演示）
+        <el-button type="primary" link @click="importSampleSkusToTable">导入到列表</el-button>
+      </template>
+    </el-alert>
 
     <!-- ── 工具栏：维度切换 + 关键字搜索 ── -->
     <div class="pm-toolbar">
@@ -795,6 +868,14 @@ load()
   background: #fff;
   border-bottom: 1px solid #e8ecf0;
   flex-shrink: 0;
+}
+
+.pm-sample-alert {
+  flex-shrink: 0;
+  margin: 0;
+  border-radius: 0;
+  border-left: none;
+  border-right: none;
 }
 
 /* 工具栏 */

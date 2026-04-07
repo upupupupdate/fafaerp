@@ -1,5 +1,5 @@
 import { daysBetween } from '@/features/listing/useListingConfig.js'
-import { NPD_APPAREL_NODES } from '@/features/product/npdApparelDefs.js'
+import { NPD_APPAREL_NODES, NPD_TIMELINE_NODE_COUNT } from '@/features/product/npdApparelDefs.js'
 
 function _addDays(dateStr, n) {
   const d = new Date(dateStr + 'T00:00:00')
@@ -12,14 +12,41 @@ function _dt(date, h, m, s) {
 }
 
 /**
- * @param {string} baseDate YYYY-MM-DD
- * @param {number} upToIdx 当前进行中的节点下标（0..7）；已完成节点为 < upToIdx
+ * workflowPhase → 时间轴当前节点下标 upToIdx（已完成节点为 idx < upToIdx）
+ * completed：upToIdx=5 使 5 个节点全部 done；rejected 卡在待审核；void 卡在草稿箱
  */
-export function buildNpdApparelTimeline(baseDate, upToIdx, id = 0) {
+export function workflowPhaseToTimelineUpIdx(phase) {
+  switch (phase) {
+    case 'draft':
+      return 0
+    case 'pending_review':
+      return 1
+    case 'pending_style':
+      return 2
+    case 'sampling':
+      return 3
+    case 'completed':
+      return NPD_TIMELINE_NODE_COUNT + 1
+    case 'rejected':
+      return 1
+    case 'void':
+      return 0
+    default:
+      return 0
+  }
+}
+
+/**
+ * @param {string} baseDate YYYY-MM-DD
+ * @param {string} workflowPhase 新品开发状态
+ * @param {number} id 行序号（演示用人名/随机）
+ */
+export function buildNpdApparelTimeline(baseDate, workflowPhase, id = 0) {
+  const upToIdx = workflowPhaseToTimelineUpIdx(workflowPhase)
   const devs = ['张开发', '李开发', '王开发', '赵开发']
   const crafts = ['钱工艺', '孙工艺', '周工艺']
   const patterns = ['吴版师', '郑版师', '冯版师']
-  const persons = [devs, devs, patterns, devs, patterns, crafts, devs, devs]
+  const persons = [devs, devs, devs, crafts, patterns]
 
   return NPD_APPAREL_NODES.map(({ key }, idx) => {
     if (idx < upToIdx) {
@@ -33,7 +60,7 @@ export function buildNpdApparelTimeline(baseDate, upToIdx, id = 0) {
       return { key, done: true, time, person }
     }
     if (idx === upToIdx) {
-      const overdue = id % 9 === 0 && idx > 0 && idx < 7
+      const overdue = id % 9 === 0 && idx > 0 && idx < NPD_TIMELINE_NODE_COUNT - 1
       return {
         key,
         done: false,
@@ -45,10 +72,10 @@ export function buildNpdApparelTimeline(baseDate, upToIdx, id = 0) {
   })
 }
 
-/** 与上架跟踪类似的环节时效展示（固定标准天数，无物流差异） */
+/** 与上架跟踪类似的环节时效（5 节点 → 4 段过渡） */
 export function calcNpdTransitionInfo(prevTl, currTl, transIdx) {
   if (!prevTl?.done) return null
-  const standard = [3, 5, 7, 10, 7, 5, 5][transIdx - 1] ?? 5
+  const standard = [3, 5, 7, 10][transIdx - 1] ?? 5
   const warning = 2
 
   const startTime = prevTl.time?.slice(0, 10)
@@ -90,4 +117,20 @@ export function attachNpdTransitionInfos(timeline) {
   return timeline.map((tl, idx) =>
     idx === 0 ? null : calcNpdTransitionInfo(timeline[idx - 1], tl, idx),
   )
+}
+
+/**
+ * 按 workflowPhase 重建时间轴（用于持久化行升级、patch 状态后）
+ */
+export function rebuildNpdRowTimeline(row) {
+  const idNum = Number(String(row.id ?? '').replace(/\D/g, '')) || 0
+  let baseDate = new Date().toISOString().slice(0, 10)
+  const firstDone = row.timeline?.find((t) => t.done && t.time)
+  if (firstDone?.time) baseDate = firstDone.time.slice(0, 10)
+  else if (row.dueDate) baseDate = String(row.dueDate).slice(0, 10)
+
+  const phase = row.workflowPhase || 'draft'
+  const timeline = buildNpdApparelTimeline(baseDate, phase, idNum)
+  const transitionInfos = attachNpdTransitionInfos(timeline)
+  return { ...row, timeline, transitionInfos }
 }

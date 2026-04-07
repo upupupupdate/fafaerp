@@ -14,6 +14,7 @@ function isActive(path) {
 const productMenuItems = [
   { path: '/product/scenes',  label: '🎯 场景管理' },
   { path: '/product/new-dev', label: '🚀 新品开发' },
+  { path: '/product/sample-board', label: '🧵 样板管理' },
   { path: '/product/list',    label: '📋 产品管理' },
   { path: '/product/config/fabric-color-cards', label: '🎨 面料色卡库' },
   { path: '/product/config/size-library',       label: '📏 尺码库' },

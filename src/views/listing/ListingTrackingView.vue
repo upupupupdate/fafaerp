@@ -1,14 +1,30 @@
 <script setup>
 import '@/features/listing/listingTableColumns.css'
-import { computed, ref, watch } from 'vue'
-import { daysBetween, getLogisticsConfig, getTransitionConfig } from '@/features/listing/useListingConfig.js'
+import { computed, onMounted, ref, shallowRef, watch } from 'vue'
+import { ArrowDown, View } from '@element-plus/icons-vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import {
-  SUB_NODES, STOCKING_SUB_NODES, STOCKING_PANELS, mainTabs,
+  daysBetween,
+  getLogisticsConfig,
+  getTransitionConfig,
+  lookupFirstLegInboundRule,
+} from '@/features/listing/useListingConfig.js'
+import {
+  LISTING_STAFF_OPTIONS,
+  STATUS_FILTER_OPTIONS,
+  SUB_NODES,
+  STOCKING_FLOW_NODES,
+  STOCKING_PANELS,
+  matchStatusPanelKey,
   resolveMainStatus,
 } from '@/features/listing/listingDefs.js'
+import { loadListingViews, saveListingViews } from '@/features/listing/listingViewsStorage.js'
 import ListingFilterBar     from '@/features/listing/components/ListingFilterBar.vue'
 import ListingNodeStatusBar from '@/features/listing/components/ListingNodeStatusBar.vue'
 import ListingProductRow    from '@/features/listing/components/ListingProductRow.vue'
+import ListingDetailDrawer  from '@/features/listing/components/ListingDetailDrawer.vue'
+import PurchasePlanEditorDialog from '@/features/listing/components/PurchasePlanEditorDialog.vue'
+import { isListingEligibleForPurchasePlan } from '@/features/listing/purchasePlanDraft.js'
 
 // ── Mock 数据常量 ──────────────────────────────────────────────────────
 const NAMES = [
@@ -40,10 +56,12 @@ const BRANDS  = ['自研','代工','OEM','联名','私标']
 const SHOPS   = ['US站','UK站','DE站','JP站','CA站','AU站']
 const LOGS    = ['海运','空运','快递','铁路']
 const PTYPES  = ['单品','单品','单品','组合品']
-const DEVS    = ['张开发','李开发','王开发','赵开发','陈开发','刘开发']
-const OPS     = ['李运营','王运营','陈运营','刘运营','林运营','吴运营']
-const DES     = ['王平面','李平面','陈平面','黄平面','郑平面','刘平面']
-const PURS    = ['赵采购','孙采购','冯采购','刘采购','周采购','陈采购']
+const SO = LISTING_STAFF_OPTIONS
+const DEVS    = SO.dev
+const OPS     = SO.ops
+const DES     = SO.design
+const PURS    = SO.purchase
+const PHOTOS  = SO.photo
 const REVS    = ['审核员A','审核员B','审核员C','审核员D']
 const WHMGRS  = ['仓管张','仓管李','仓管王','仓管赵']
 const AGENTS  = ['货代陈','货代孙','货代周','货代钱']
@@ -57,12 +75,12 @@ function _dt(date, h, m, s) {
   return `${date} ${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`
 }
 
-/** mock：将 timeline[fromIdx..8] 日期整体后移，拉长某段区间以产生「环节曾超时」，便于「超时」筛选联调（接 API 后以真实时间为准） */
+/** mock：将 timeline[fromIdx..10] 日期整体后移 */
 function _shiftTimelineNodesFrom(timeline, fromIdx, addDays) {
-  for (let i = fromIdx; i <= 8; i++) {
+  for (let i = fromIdx; i <= 10; i++) {
     const n = timeline[i]
     if (!n?.time) continue
-    if (i === 8) {
+    if (i === 10) {
       n.time = _addDays(n.time.slice(0, 10), addDays)
     } else {
       const datePart = n.time.slice(0, 10)
@@ -73,23 +91,35 @@ function _shiftTimelineNodesFrom(timeline, fromIdx, addDays) {
 }
 
 function _buildTimeline(baseDate, upToIdx, id, ops, purchase) {
-  const persons = [ops, ops, REVS[id%4], purchase, WHMGRS[id%4], purchase, AGENTS[id%4], WHMGRS[id%4], ops]
+  const persons = [
+    ops,
+    ops,
+    REVS[id % 4],
+    purchase,
+    WHMGRS[id % 4],
+    purchase,
+    AGENTS[id % 4],
+    WHMGRS[id % 4],
+    WHMGRS[id % 4],
+    ops,
+    ops,
+  ]
   return SUB_NODES.map(({ key }, idx) => {
     if (idx < upToIdx) {
       const d = _addDays(baseDate, idx * 2 + 1 + (id % 3))
       const h = 8 + (idx * 3 + id) % 10
       const m = (idx * 13 + id * 7) % 60
-      const s = (idx * 7  + id * 3) % 60
-      const time = idx === 8 ? d : _dt(d, h, m, s)
+      const s = (idx * 7 + id * 3) % 60
+      const time = idx === 10 ? d : _dt(d, h, m, s)
       const node = { key, done: true, time, person: persons[idx] }
-      if (idx === 1) node.no = `PL2025${String(id).padStart(3,'0')}`
-      if (idx === 3) node.no = `PO2025${String(id).padStart(3,'0')}`
-      if (idx === 5) node.no = `FBA-CN-${String(id).padStart(3,'0')}`
+      if (idx === 1) node.no = `PL2025${String(id).padStart(3, '0')}`
+      if (idx === 3) node.no = `PO2025${String(id).padStart(3, '0')}`
+      if (idx === 5) node.no = `FBA-CN-${String(id).padStart(3, '0')}`
       return node
     }
     if (idx === upToIdx) {
-      const overdue = (id % 7 === 0 && idx < 8)
-      return { key, done: false, overdue, ...(idx === 8 ? { estimatedTime: _addDays(baseDate, 50) } : {}) }
+      const overdue = id % 7 === 0 && idx < 10
+      return { key, done: false, overdue, ...(idx === 10 ? { estimatedTime: _addDays(baseDate, 50) } : {}) }
     }
     return { key, done: false }
   })
@@ -102,42 +132,39 @@ function _makeProd(id, mainStatus, subNodeKey, baseDate) {
   const ops = OPS[id % OPS.length]
   const des = DES[id % DES.length]
   const pur = PURS[id % PURS.length]
+  const photo = PHOTOS[id % PHOTOS.length]
   const snIdx = subNodeKey ? SUB_NODES.findIndex(n => n.key === subNodeKey) : -1
 
-  let timeline, readyTime = '', totalDays = null, listingStatus = '未上传'
-  let listingUploadTime = '', designStatus = '待启动', designCompletedTime = ''
+  let timeline, readyTime = '', listingStatus = '未上传'
+  let listingUploadTime = '', designStatus = '待平面设计', designCompletedTime = ''
 
   if (mainStatus === 'pending') {
     timeline = SUB_NODES.map(({ key }) => ({ key, done: false }))
   } else if (mainStatus === 'stocking') {
-    // upToIdx 最小取 1，确保"已分配"节点对所有备货发货产品均为绿色（有时间+人员）
     timeline = _buildTimeline(baseDate, Math.max(1, snIdx), id, ops, pur)
-    designStatus  = snIdx >= 6 ? '完成平面设计' : snIdx >= 3 ? '进行中' : '待启动'
+    designStatus = snIdx >= 6 ? '完成平面设计' : '待平面设计'
     listingStatus = snIdx >= 4 && id % 2 === 0 ? '已上传' : '未上传'
-    listingUploadTime   = listingStatus === '已上传' ? _addDays(baseDate, 20) : ''
+    listingUploadTime = listingStatus === '已上传' ? _addDays(baseDate, 20) : ''
     designCompletedTime = snIdx >= 6 ? _addDays(baseDate, 12 + id % 6) : ''
   } else if (mainStatus === 'ready') {
-    // 可开售：待入仓(index 7)节点已完成 + 完成平面设计
-    timeline = _buildTimeline(baseDate, 8, id, ops, pur)
-    timeline[8] = { key: 'launched', done: false, estimatedTime: _addDays(baseDate, 50) }
-    designStatus        = '完成平面设计'
-    designCompletedTime = _addDays(baseDate, 12 + id % 6)
-    listingStatus       = '已上传'
-    listingUploadTime   = _addDays(baseDate, 22)
-    readyTime           = _addDays(baseDate, 48)
-  } else {
-    // listed: 全节点完成
     timeline = _buildTimeline(baseDate, 9, id, ops, pur)
+    timeline[10] = { key: 'launched', done: false, estimatedTime: _addDays(baseDate, 50) }
+    designStatus = '完成平面设计'
+    designCompletedTime = _addDays(baseDate, 12 + id % 6)
+    listingStatus = '已上传'
+    listingUploadTime = _addDays(baseDate, 22)
+    readyTime = _addDays(baseDate, 48)
+  } else {
+    timeline = _buildTimeline(baseDate, 11, id, ops, pur)
     // mock：约 1/3 已开售单拉长某段区间，使 calcTransitionInfo 出现曾超时环节，【已开售】下也可用右上角「超时」筛出
     if (id % 3 === 1) {
       _shiftTimelineNodesFrom(timeline, 4, 6 + (id % 8))
     }
-    designStatus        = '完成平面设计'
+    designStatus = '完成平面设计'
     designCompletedTime = _addDays(baseDate, 12 + id % 6)
     listingStatus       = '已上传'
     listingUploadTime   = _addDays(baseDate, 22)
     readyTime           = _addDays(baseDate, 48)
-    totalDays           = 50 + (id % 15)
   }
 
   const skuNum = String((id * 12345) % 899999 + 100000)
@@ -157,15 +184,20 @@ function _makeProd(id, mainStatus, subNodeKey, baseDate) {
     brand:    BRANDS[id % BRANDS.length],
     shop:     sh,
     productType: PTYPES[id % PTYPES.length],
-    staff: { dev, ops, design: des, purchase: pur },
+    staff: { dev, ops, design: des, purchase: pur, photo },
+    needShoot: id % 3 !== 1,
+    needSample: id % 4 < 2,
+    hasParentPlan: id % 5 === 0,
     listingStatus,
     listingUploadTime,
     designStatus,
     designCompletedTime,
     authTime: baseDate,
     readyTime,
-    totalDays,
     logistics: LOGS[id % LOGS.length],
+    /** 头程入仓规则匹配：待入仓 → 货件入仓 */
+    shipCountry: '中国内地',
+    destWarehouse: ['美东 FBA 仓', '美西 FBA 仓', '国内中转仓', '海外仓'][id % 4],
     timeline,
   }
 }
@@ -178,7 +210,8 @@ const _stockingSNs = [
   ...Array(8).fill('po_inbound'),
   ...Array(7).fill('shipment_build'),
   ...Array(7).fill('shipment_send'),
-  ...Array(10).fill('in_transit'),
+  ...Array(7).fill('in_transit'),
+  ...Array(3).fill('warehouse_received'),
 ]
 
 function genMockProducts() {
@@ -219,146 +252,357 @@ function genMockProducts() {
 const allProducts = ref(genMockProducts())
 
 // ── 页面状态 ──────────────────────────────────────────────────────────
-const mainStatus    = ref('all')
-const activeSubNode = ref(null)
-const alertFilter   = ref(null) // null | 'overdue' | 'warning'
+const alertFilter = ref(null) // null | 'overdue' | 'warning'
 const currentPage   = ref(1)
 const PAGE_SIZE     = 50
 
 // ── 筛选状态 ──────────────────────────────────────────────────────────
-const searchField     = ref('name')
-const searchKeyword   = ref('')
+const searchField = ref('name')
+const searchKeyword = ref('')
+/** true：批量精准（多值与当前字段全等，OR）；false：模糊 + 引号全等 */
+const searchBatchExact = ref(false)
 const filterListing   = ref('')
 const filterDesign    = ref('')
-const filterShop      = ref('')
-const filterBrand     = ref('')
-const filterPType     = ref('')
-const filterCategory  = ref('')
-const filterScene     = ref('')
-const filterSeason    = ref('')
+const filterShop      = ref([])
+const filterBrand     = ref([])
+const filterPType     = ref([])
+const filterCategory  = ref([])
+const filterScene     = ref([])
+const filterSeason    = ref([])
 const filterTimeField = ref('')
 const filterDateRange = ref([])
+/** 与面板多选一致：空表示不按状态条筛 */
+const filterStatusKeys = ref([])
+/** 列表排序：'' | auth_asc | auth_desc */
+const listSort = ref('')
+/** 授权方式筛选（占位，后续可对接字段） */
+const filterAuthMode = ref('')
+/** 更多筛选：人员 */
+const filterStaffOps = ref([])
+const filterStaffDev = ref([])
+const filterStaffDesign = ref([])
+const filterStaffPhoto = ref([])
+const filterStaffPurchase = ref([])
+/** 更多筛选：三态布尔 null=不限 */
+const filterNeedShoot = ref(null)
+const filterNeedSample = ref(null)
+const filterHasParentPlan = ref(null)
+
+const activeSubNode = computed({
+  get: () => (filterStatusKeys.value.length === 1 ? filterStatusKeys.value[0] : null),
+  set: v => {
+    if (v == null || v === '') filterStatusKeys.value = []
+    else filterStatusKeys.value = [v]
+  },
+})
+
+// ── 系统视图（localStorage）────────────────────────────────────────────
+const _viewsLoaded = loadListingViews()
+const savedViews = ref(_viewsLoaded.views)
+const defaultViewId = ref(_viewsLoaded.defaultId)
+const activeViewId = ref(null)
+const viewSaveName = ref('')
+const viewSaveDialog = ref(false)
 
 watch(
-  [searchKeyword, searchField, filterListing, filterDesign, filterShop, filterBrand,
-   filterPType, filterCategory, filterScene, filterSeason, mainStatus, activeSubNode, alertFilter],
+  [searchKeyword, searchField, searchBatchExact, filterListing, filterDesign, filterShop, filterBrand,
+   filterPType, filterCategory, filterScene, filterSeason, filterStatusKeys, alertFilter,
+   filterTimeField, filterDateRange, listSort, filterAuthMode,
+   filterStaffOps, filterStaffDev, filterStaffDesign, filterStaffPhoto, filterStaffPurchase,
+   filterNeedShoot, filterNeedSample, filterHasParentPlan],
   () => { currentPage.value = 1 },
 )
 
-function doReset() {
-  searchKeyword.value   = ''
-  searchField.value     = 'name'
-  filterListing.value   = ''
-  filterDesign.value    = ''
-  filterShop.value      = ''
-  filterBrand.value     = ''
-  filterPType.value     = ''
-  filterCategory.value  = ''
-  filterScene.value     = ''
-  filterSeason.value    = ''
-  filterTimeField.value = ''
-  filterDateRange.value = []
-  alertFilter.value     = null
+/** 系统视图快照：旧版为单选字符串，现统一为多选数组 */
+function normStrArr(v) {
+  if (Array.isArray(v)) return v.filter(x => x != null && String(x).trim() !== '')
+  if (v == null || v === '') return []
+  return [String(v)]
 }
 
-// ── 公用筛选函数（复用在 filteredProducts 和 stockingBaseFiltered）──
-function applyCommonFilters(list) {
-  if (searchKeyword.value.trim()) {
-    const kw = searchKeyword.value.trim().toLowerCase()
-    list = list.filter(p => {
-      switch (searchField.value) {
-        case 'sku':  return p.sku.toLowerCase().includes(kw)
-        case 'msku': return p.msku.toLowerCase().includes(kw)
-        case 'asin': return p.asin.toLowerCase().includes(kw)
-        default:     return p.nameCn.toLowerCase().includes(kw)
-      }
-    })
+function fieldValue(p, field) {
+  switch (field) {
+    case 'name': return p.nameCn ?? ''
+    case 'sku': return p.sku ?? ''
+    case 'msku': return p.msku ?? ''
+    case 'asin': return p.asin ?? ''
+    default: return p.nameCn ?? ''
   }
-  if (filterListing.value)  list = list.filter(p => p.listingStatus === filterListing.value)
-  if (filterDesign.value)   list = list.filter(p => p.designStatus  === filterDesign.value)
-  if (filterShop.value)     list = list.filter(p => p.shop          === filterShop.value)
-  if (filterBrand.value)    list = list.filter(p => p.brand         === filterBrand.value)
-  if (filterPType.value)    list = list.filter(p => p.productType   === filterPType.value)
-  if (filterCategory.value) list = list.filter(p => p.category      === filterCategory.value)
-  if (filterScene.value)    list = list.filter(p => p.scene         === filterScene.value)
-  if (filterSeason.value)   list = list.filter(p => p.season        === filterSeason.value)
+}
+
+/** 多值分隔；批量精准：每段与当前字段全等（OR）；否则模糊 + 引号全等 */
+function applySearchTokens(list) {
+  const raw = searchKeyword.value.trim()
+  if (!raw) return list
+  const tokens = raw.split(/[\n,，;；]+/).map(t => t.trim()).filter(Boolean)
+  return list.filter(p => {
+    const fv = String(fieldValue(p, searchField.value))
+    return tokens.some(tok => {
+      if (searchBatchExact.value) {
+        return fv.toLowerCase() === tok.toLowerCase()
+      }
+      const m = /^"(.+)"$/.exec(tok)
+      if (m) return fv === m[1]
+      return fv.toLowerCase().includes(tok.toLowerCase())
+    })
+  })
+}
+
+function timeFieldValue(p, field) {
+  if (!field) return ''
+  const t = p.timeline
+  switch (field) {
+    case 'authTime': return (p.authTime || '').slice(0, 10)
+    case 'planTime': return (t?.[1]?.time || '').slice(0, 10)
+    case 'poTime': return (t?.[3]?.time || '').slice(0, 10)
+    case 'inboundTime': return (t?.[4]?.time || '').slice(0, 10)
+    case 'sendTime': return (t?.[6]?.time || '').slice(0, 10)
+    case 'inTransitTime': return (t?.[7]?.time || '').slice(0, 10)
+    case 'launchTime': return (t?.[9]?.time || '').slice(0, 10)
+    case 'listingUploadTime': return (p.listingUploadTime || '').slice(0, 10)
+    default: return ''
+  }
+}
+
+function applyTimeRange(list) {
+  const field = filterTimeField.value
+  const range = filterDateRange.value
+  if (!field || !range || range.length !== 2) return list
+  const [a, b] = range
+  const start = a instanceof Date ? a.toISOString().slice(0, 10) : String(a).slice(0, 10)
+  const end = b instanceof Date ? b.toISOString().slice(0, 10) : String(b).slice(0, 10)
+  return list.filter(p => {
+    const d = timeFieldValue(p, field)
+    if (!d) return false
+    return d >= start && d <= end
+  })
+}
+
+function applyCommonFilters(list) {
+  list = applySearchTokens(list)
+  list = applyTimeRange(list)
+  if (filterListing.value) list = list.filter(p => p.listingStatus === filterListing.value)
+  if (filterDesign.value) list = list.filter(p => p.designStatus === filterDesign.value)
+  if (filterShop.value.length) list = list.filter(p => filterShop.value.includes(p.shop))
+  if (filterBrand.value.length) list = list.filter(p => filterBrand.value.includes(p.brand))
+  if (filterPType.value.length) list = list.filter(p => filterPType.value.includes(p.productType))
+  if (filterCategory.value.length) list = list.filter(p => filterCategory.value.includes(p.category))
+  if (filterScene.value.length) list = list.filter(p => filterScene.value.includes(p.scene))
+  if (filterSeason.value.length) list = list.filter(p => filterSeason.value.includes(p.season))
+  if (filterStaffOps.value.length) list = list.filter(p => filterStaffOps.value.includes(p.staff?.ops))
+  if (filterStaffDev.value.length) list = list.filter(p => filterStaffDev.value.includes(p.staff?.dev))
+  if (filterStaffDesign.value.length) list = list.filter(p => filterStaffDesign.value.includes(p.staff?.design))
+  if (filterStaffPhoto.value.length) list = list.filter(p => filterStaffPhoto.value.includes(p.staff?.photo))
+  if (filterStaffPurchase.value.length) list = list.filter(p => filterStaffPurchase.value.includes(p.staff?.purchase))
+  if (filterNeedShoot.value === true) list = list.filter(p => p.needShoot === true)
+  if (filterNeedShoot.value === false) list = list.filter(p => p.needShoot === false)
+  if (filterNeedSample.value === true) list = list.filter(p => p.needSample === true)
+  if (filterNeedSample.value === false) list = list.filter(p => p.needSample === false)
+  if (filterHasParentPlan.value === true) list = list.filter(p => p.hasParentPlan === true)
+  if (filterHasParentPlan.value === false) list = list.filter(p => p.hasParentPlan === false)
   return list
 }
 
-// ── 侧边栏计数：使用 resolveMainStatus 保证流转后的计数准确 ──────────
-const tabCounts = computed(() => {
-  const base = allProducts.value
+function buildSnapshot() {
   return {
-    all:      base.length,
-    pending:  base.filter(p => resolveMainStatus(p) === 'pending').length,
-    stocking: base.filter(p => resolveMainStatus(p) === 'stocking').length,
-    ready:    base.filter(p => resolveMainStatus(p) === 'ready').length,
-    listed:   base.filter(p => resolveMainStatus(p) === 'listed').length,
+    filterStatusKeys: [...filterStatusKeys.value],
+    searchField: searchField.value,
+    searchKeyword: searchKeyword.value,
+    searchBatchExact: searchBatchExact.value,
+    filterListing: filterListing.value,
+    filterDesign: filterDesign.value,
+    filterShop: [...filterShop.value],
+    filterBrand: [...filterBrand.value],
+    filterPType: [...filterPType.value],
+    filterCategory: [...filterCategory.value],
+    filterScene: [...filterScene.value],
+    filterSeason: [...filterSeason.value],
+    filterTimeField: filterTimeField.value,
+    filterDateRange: filterDateRange.value?.length === 2 ? [...filterDateRange.value] : [],
+    alertFilter: alertFilter.value,
+    listSort: listSort.value,
+    filterAuthMode: filterAuthMode.value,
+    filterStaffOps: [...filterStaffOps.value],
+    filterStaffDev: [...filterStaffDev.value],
+    filterStaffDesign: [...filterStaffDesign.value],
+    filterStaffPhoto: [...filterStaffPhoto.value],
+    filterStaffPurchase: [...filterStaffPurchase.value],
+    filterNeedShoot: filterNeedShoot.value,
+    filterNeedSample: filterNeedSample.value,
+    filterHasParentPlan: filterHasParentPlan.value,
   }
-})
+}
 
-// ── 备货发货子节点统计面板：基于当前筛选结果动态计算 ──────────────────
-// 只应用普通筛选条件，不过滤 activeSubNode，让所有面板计数同步随查询变化
-const stockingBaseFiltered = computed(() => {
-  let list = allProducts.value.filter(p => resolveMainStatus(p) === 'stocking')
-  return applyCommonFilters(list)
-})
+function applySnapshot(s) {
+  if (!s) return
+  filterStatusKeys.value = Array.isArray(s.filterStatusKeys) ? [...s.filterStatusKeys] : []
+  searchField.value = s.searchField ?? 'name'
+  searchKeyword.value = s.searchKeyword ?? ''
+  searchBatchExact.value = !!s.searchBatchExact
+  filterListing.value = s.filterListing ?? ''
+  filterDesign.value = s.filterDesign ?? ''
+  filterShop.value = normStrArr(s.filterShop)
+  filterBrand.value = normStrArr(s.filterBrand)
+  filterPType.value = normStrArr(s.filterPType)
+  filterCategory.value = normStrArr(s.filterCategory)
+  filterScene.value = normStrArr(s.filterScene)
+  filterSeason.value = normStrArr(s.filterSeason)
+  filterTimeField.value = s.filterTimeField ?? ''
+  filterDateRange.value = s.filterDateRange?.length === 2 ? [...s.filterDateRange] : []
+  alertFilter.value = s.alertFilter ?? null
+  listSort.value = s.listSort ?? ''
+  filterAuthMode.value = s.filterAuthMode ?? ''
+  filterStaffOps.value = normStrArr(s.filterStaffOps)
+  filterStaffDev.value = normStrArr(s.filterStaffDev)
+  filterStaffDesign.value = normStrArr(s.filterStaffDesign)
+  filterStaffPhoto.value = normStrArr(s.filterStaffPhoto)
+  filterStaffPurchase.value = normStrArr(s.filterStaffPurchase)
+  filterNeedShoot.value = s.filterNeedShoot === true || s.filterNeedShoot === false ? s.filterNeedShoot : null
+  filterNeedSample.value = s.filterNeedSample === true || s.filterNeedSample === false ? s.filterNeedSample : null
+  filterHasParentPlan.value =
+    s.filterHasParentPlan === true || s.filterHasParentPlan === false ? s.filterHasParentPlan : null
+}
 
-// 为统计面板附加 transitionInfos，用于计算 warning 状态数量
-const stockingBaseEnriched = computed(() =>
-  stockingBaseFiltered.value.map(p => ({
+function persistViews() {
+  saveListingViews(savedViews.value, defaultViewId.value)
+}
+
+function onSaveView() {
+  const name = viewSaveName.value.trim().slice(0, 20)
+  if (!name) {
+    ElMessage.warning('请输入视图名称')
+    return
+  }
+  const id = `v_${Date.now()}`
+  savedViews.value = [...savedViews.value, { id, name, snapshot: buildSnapshot() }]
+  if (savedViews.value.length === 1) defaultViewId.value = id
+  persistViews()
+  activeViewId.value = id
+  viewSaveDialog.value = false
+  viewSaveName.value = ''
+  ElMessage.success('已保存视图')
+}
+
+function onApplyView(id) {
+  const v = savedViews.value.find(x => x.id === id)
+  if (v?.snapshot) applySnapshot(v.snapshot)
+  activeViewId.value = id
+}
+
+function onSetDefaultView(id) {
+  if (!id) return
+  defaultViewId.value = id
+  persistViews()
+  ElMessage.success('已设为默认视图')
+}
+
+function onDeleteView(id) {
+  if (!id) return
+  ElMessageBox.confirm('确认删除该视图？', '提示', { type: 'warning' })
+    .then(() => {
+      savedViews.value = savedViews.value.filter(x => x.id !== id)
+      if (defaultViewId.value === id) defaultViewId.value = savedViews.value[0]?.id ?? null
+      if (activeViewId.value === id) activeViewId.value = null
+      persistViews()
+      ElMessage.success('已删除')
+    })
+    .catch(() => {})
+}
+
+function onViewMenuCommand(cmd) {
+  if (cmd === 'save-as') viewSaveDialog.value = true
+  else if (cmd === 'update') onUpdateCurrentView()
+  else if (cmd === 'default') onSetDefaultView(activeViewId.value)
+  else if (cmd === 'delete') onDeleteView(activeViewId.value)
+}
+
+function onUpdateCurrentView() {
+  const id = activeViewId.value
+  const v = savedViews.value.find(x => x.id === id)
+  if (!v) return
+  v.snapshot = buildSnapshot()
+  persistViews()
+  ElMessage.success('已更新当前视图')
+}
+
+function doReset() {
+  searchKeyword.value = ''
+  searchField.value = 'name'
+  searchBatchExact.value = false
+  filterListing.value = ''
+  filterDesign.value = ''
+  filterShop.value = []
+  filterBrand.value = []
+  filterPType.value = []
+  filterCategory.value = []
+  filterScene.value = []
+  filterSeason.value = []
+  filterTimeField.value = ''
+  filterDateRange.value = []
+  filterStatusKeys.value = []
+  alertFilter.value = null
+  listSort.value = ''
+  filterAuthMode.value = ''
+  filterStaffOps.value = []
+  filterStaffDev.value = []
+  filterStaffDesign.value = []
+  filterStaffPhoto.value = []
+  filterStaffPurchase.value = []
+  filterNeedShoot.value = null
+  filterNeedSample.value = null
+  filterHasParentPlan.value = null
+  activeViewId.value = null
+}
+
+// ── 统计面板用：仅应用公共/时间/搜索，不按侧栏主状态与状态条筛 ─────────
+const statsBaseFiltered = computed(() => applyCommonFilters([...allProducts.value]))
+
+const statsBaseEnriched = computed(() =>
+  statsBaseFiltered.value.map(p => ({
     ...p,
+    mainStatus: resolveMainStatus(p),
     transitionInfos: p.timeline.map((tl, idx) =>
-      idx === 0 ? null : calcTransitionInfo(p.timeline[idx-1], tl, idx, p.logistics),
+      idx === 0
+        ? null
+        : calcTransitionInfo(p.timeline[idx - 1], tl, idx, p.logistics, {
+            shipCountry: p.shipCountry,
+            destWarehouse: p.destWarehouse,
+          }),
     ),
-  }))
+  })),
 )
 
 const dynamicNodeStats = computed(() => {
   const stats = {}
-
-  // 7 个常规子节点
-  for (const node of STOCKING_SUB_NODES) {
-    const tlIdx  = SUB_NODES.findIndex(n => n.key === node.key)
-    const inNode = stockingBaseEnriched.value.filter(p => p.subNode === node.key)
-    stats[node.key] = {
-      total:   inNode.length,
-      warning: inNode.filter(p => p.transitionInfos[tlIdx]?.state === 'warning').length,
-      overdue: inNode.filter(p =>
-        p.transitionInfos[tlIdx]?.state === 'overdue' || p.timeline[tlIdx]?.overdue === true
-      ).length,
+  const base = statsBaseEnriched.value
+  for (const pan of STOCKING_PANELS) {
+    const key = pan.key
+    const inNode = base.filter(p => matchStatusPanelKey(p, key))
+    const tlIdx = SUB_NODES.findIndex(n => n.key === key)
+    if (tlIdx >= 0 && STOCKING_FLOW_NODES.some(n => n.key === key)) {
+      stats[key] = {
+        total: inNode.length,
+        warning: inNode.filter(p => p.transitionInfos[tlIdx]?.state === 'warning').length,
+        overdue: inNode.filter(
+          p => p.transitionInfos[tlIdx]?.state === 'overdue' || p.timeline[tlIdx]?.overdue === true,
+        ).length,
+      }
+    } else {
+      stats[key] = {
+        total: inNode.length,
+        warning: inNode.filter(p => p.transitionInfos.some(t => t?.state === 'warning')).length,
+        overdue: inNode.filter(p => p.transitionInfos.some(t => t?.state === 'overdue')).length,
+      }
     }
   }
-
-  // 货件入仓派生面板：待入仓节点已完成但平面设计尚未完成
-  const warehouseIn = stockingBaseEnriched.value.filter(
-    p => p.timeline[7]?.done === true && p.designStatus !== '完成平面设计'
-  )
-  stats['warehouse_received'] = {
-    total:   warehouseIn.length,
-    warning: 0,
-    overdue: 0,
-  }
-
   return stats
 })
 
-// ── 列表数据：应用全部筛选（不含 alertFilter，alertFilter 在下一步处理）──
 const filteredProducts = computed(() => {
   let list = allProducts.value
 
-  // 主状态过滤（使用动态 resolveMainStatus）
-  if (mainStatus.value !== 'all') {
-    list = list.filter(p => resolveMainStatus(p) === mainStatus.value)
-  }
-  // 子节点过滤（仅在备货发货主状态下生效）
-  if (mainStatus.value === 'stocking' && activeSubNode.value) {
-    if (activeSubNode.value === 'warehouse_received') {
-      // 派生面板：货件已入仓但平面设计未完成
-      list = list.filter(p => p.timeline[7]?.done === true && p.designStatus !== '完成平面设计')
-    } else {
-      list = list.filter(p => p.subNode === activeSubNode.value)
-    }
+  if (filterStatusKeys.value.length) {
+    list = list.filter(p => filterStatusKeys.value.some(k => matchStatusPanelKey(p, k)))
   }
 
   list = applyCommonFilters(list)
@@ -367,7 +611,12 @@ const filteredProducts = computed(() => {
     ...p,
     mainStatus: resolveMainStatus(p),
     transitionInfos: p.timeline.map((tl, idx) =>
-      idx === 0 ? null : calcTransitionInfo(p.timeline[idx - 1], tl, idx, p.logistics),
+      idx === 0
+        ? null
+        : calcTransitionInfo(p.timeline[idx - 1], tl, idx, p.logistics, {
+            shipCountry: p.shipCountry,
+            destWarehouse: p.destWarehouse,
+          }),
     ),
   }))
 })
@@ -392,21 +641,220 @@ const alertedProducts = computed(() => {
   return filteredProducts.value
 })
 
+const sortedAlertedProducts = computed(() => {
+  const arr = [...alertedProducts.value]
+  const sort = listSort.value
+  if (sort === 'auth_asc') {
+    arr.sort((a, b) => String(a.authTime || '').localeCompare(String(b.authTime || '')))
+  } else if (sort === 'auth_desc') {
+    arr.sort((a, b) => String(b.authTime || '').localeCompare(String(a.authTime || '')))
+  }
+  return arr
+})
+
 const paginatedProducts = computed(() => {
   const start = (currentPage.value - 1) * PAGE_SIZE
-  return alertedProducts.value.slice(start, start + PAGE_SIZE)
+  return sortedAlertedProducts.value.slice(start, start + PAGE_SIZE)
 })
+
+/** 勾选 id（跨页保留）；筛选结果集合变化时清空（市面常见：条件一变重选） */
+const selectedIds = shallowRef(new Set())
+
+function toggleProductSelect(id) {
+  const s = new Set(selectedIds.value)
+  if (s.has(id)) s.delete(id)
+  else s.add(id)
+  selectedIds.value = s
+}
+
+/** 当前筛选结果（与分页排序一致的全集）内选中数量，用于表头全选三态 */
+const selectionInFilter = computed(() => {
+  const list = sortedAlertedProducts.value
+  const ids = list.map(p => p.id)
+  const set = selectedIds.value
+  let c = 0
+  for (const id of ids) {
+    if (set.has(id)) c++
+  }
+  const total = ids.length
+  return {
+    total,
+    selected: c,
+    allSelected: total > 0 && c === total,
+    someSelected: c > 0 && c < total,
+  }
+})
+
+const headerSelectAll = computed(() => selectionInFilter.value.allSelected)
+const headerSelectIndeterminate = computed(() => selectionInFilter.value.someSelected)
+
+function onHeaderSelectAll(checked) {
+  const ids = sortedAlertedProducts.value.map(p => p.id)
+  const s = new Set(selectedIds.value)
+  if (checked) {
+    ids.forEach(id => s.add(id))
+  } else {
+    ids.forEach(id => s.delete(id))
+  }
+  selectedIds.value = s
+}
+
+/** 筛选结果 id 集合变化（不含仅排序变化）时清空勾选 */
+watch(
+  () => [...sortedAlertedProducts.value.map(p => p.id)].sort((a, b) => a - b).join(','),
+  (sig, prev) => {
+    if (prev !== undefined && sig !== prev) {
+      selectedIds.value = new Set()
+    }
+  },
+)
+
+/** Listing 详情抽屉 */
+const listingDetailOpen = ref(false)
+const listingDetailProduct = ref(null)
+function openListingDetail(product) {
+  listingDetailProduct.value = product
+  listingDetailOpen.value = true
+}
+
+/** 列表页：创建采购计划（勾选带入 / 空选后从列表添加） */
+const purchasePlanEditorOpen = ref(false)
+const purchasePrefillIds = ref([])
+
+function openPurchasePlanFromToolbar() {
+  const ids = [...selectedIds.value]
+  const eligible = new Set(
+    alertedProducts.value.filter(isListingEligibleForPurchasePlan).map((p) => p.id),
+  )
+  if (ids.length) {
+    const ok = ids.filter((id) => eligible.has(id))
+    if (!ok.length) {
+      ElMessage.warning('当前勾选中没有「待建计划」产品，请重新勾选，或留空后打开从列表添加')
+      return
+    }
+    if (ok.length < ids.length) {
+      ElMessage.info(`已忽略 ${ids.length - ok.length} 条非待建计划，将带入 ${ok.length} 条`)
+    }
+    purchasePrefillIds.value = ok
+  } else {
+    purchasePrefillIds.value = []
+  }
+  purchasePlanEditorOpen.value = true
+}
+
+const SEARCH_FIELD_LABEL = { name: '品名', sku: 'SKU', msku: 'MSKU', asin: 'ASIN' }
+
+const filterTags = computed(() => {
+  const tags = []
+  if (searchKeyword.value.trim()) {
+    const fl = SEARCH_FIELD_LABEL[searchField.value] || '品名'
+    const kw = searchKeyword.value
+    const preview = kw.length > 28 ? `${kw.slice(0, 28)}…` : kw
+    tags.push({
+      id: 'search',
+      label: `${fl}${searchBatchExact.value ? '（批量精准）' : ''}: ${preview}`,
+    })
+  }
+  for (const k of filterStatusKeys.value) {
+    const opt = STATUS_FILTER_OPTIONS.find(o => o.key === k)
+    tags.push({ id: `status:${k}`, label: `节点: ${opt?.label ?? k}` })
+  }
+  if (filterListing.value) tags.push({ id: 'listing', label: `Listing: ${filterListing.value}` })
+  if (filterDesign.value) tags.push({ id: 'design', label: `平面: ${filterDesign.value}` })
+  if (filterShop.value.length) tags.push({ id: 'shop', label: `店铺: ${filterShop.value.join('、')}` })
+  if (filterBrand.value.length) tags.push({ id: 'brand', label: `品牌: ${filterBrand.value.join('、')}` })
+  if (filterPType.value.length) tags.push({ id: 'ptype', label: `类型: ${filterPType.value.join('、')}` })
+  if (filterCategory.value.length) tags.push({ id: 'category', label: `品类: ${filterCategory.value.join('、')}` })
+  if (filterScene.value.length) tags.push({ id: 'scene', label: `场景: ${filterScene.value.join('、')}` })
+  if (filterSeason.value.length) tags.push({ id: 'season', label: `季节: ${filterSeason.value.join('、')}` })
+  if (filterTimeField.value && filterDateRange.value?.length === 2) {
+    tags.push({ id: 'time', label: '时间范围已选' })
+  }
+  if (listSort.value) {
+    const map = { auth_asc: '开发授权时间升序', auth_desc: '开发授权时间降序' }
+    tags.push({ id: 'sort', label: `排序: ${map[listSort.value]}` })
+  }
+  if (filterAuthMode.value) {
+    const map = { manual: '人工', system: '系统' }
+    tags.push({ id: 'auth', label: `授权方式: ${map[filterAuthMode.value]}` })
+  }
+  if (alertFilter.value === 'warning') {
+    tags.push({ id: 'alert', label: '仅看：预警' })
+  } else if (alertFilter.value === 'overdue') {
+    tags.push({ id: 'alert', label: '仅看：超时' })
+  }
+  if (filterStaffOps.value.length) tags.push({ id: 'stops', label: `运营: ${filterStaffOps.value.join('、')}` })
+  if (filterStaffDev.value.length) tags.push({ id: 'stdev', label: `开发: ${filterStaffDev.value.join('、')}` })
+  if (filterStaffDesign.value.length) tags.push({ id: 'stdesign', label: `平面人员: ${filterStaffDesign.value.join('、')}` })
+  if (filterStaffPhoto.value.length) tags.push({ id: 'stphoto', label: `摄影: ${filterStaffPhoto.value.join('、')}` })
+  if (filterStaffPurchase.value.length) tags.push({ id: 'stpur', label: `采购: ${filterStaffPurchase.value.join('、')}` })
+  if (filterNeedShoot.value === true) tags.push({ id: 'needShoot', label: '需要拍摄: 是' })
+  if (filterNeedShoot.value === false) tags.push({ id: 'needShoot', label: '需要拍摄: 否' })
+  if (filterNeedSample.value === true) tags.push({ id: 'needSample', label: '需要样品: 是' })
+  if (filterNeedSample.value === false) tags.push({ id: 'needSample', label: '需要样品: 否' })
+  if (filterHasParentPlan.value === true) tags.push({ id: 'hasParent', label: '存在父体规划: 是' })
+  if (filterHasParentPlan.value === false) tags.push({ id: 'hasParent', label: '存在父体规划: 否' })
+  return tags
+})
+
+function removeFilterTag(id) {
+  if (id === 'search') {
+    searchKeyword.value = ''
+    searchBatchExact.value = false
+    return
+  }
+  if (id.startsWith('status:')) {
+    const k = id.slice(7)
+    filterStatusKeys.value = filterStatusKeys.value.filter(x => x !== k)
+    return
+  }
+  if (id === 'listing') { filterListing.value = ''; return }
+  if (id === 'design') { filterDesign.value = ''; return }
+  if (id === 'shop') { filterShop.value = []; return }
+  if (id === 'brand') { filterBrand.value = []; return }
+  if (id === 'ptype') { filterPType.value = []; return }
+  if (id === 'category') { filterCategory.value = []; return }
+  if (id === 'scene') { filterScene.value = []; return }
+  if (id === 'season') { filterSeason.value = []; return }
+  if (id === 'time') {
+    filterTimeField.value = ''
+    filterDateRange.value = []
+    return
+  }
+  if (id === 'sort') { listSort.value = ''; return }
+  if (id === 'auth') { filterAuthMode.value = ''; return }
+  if (id === 'alert') {
+    alertFilter.value = null
+    return
+  }
+  if (id === 'stops') { filterStaffOps.value = []; return }
+  if (id === 'stdev') { filterStaffDev.value = []; return }
+  if (id === 'stdesign') { filterStaffDesign.value = []; return }
+  if (id === 'stphoto') { filterStaffPhoto.value = []; return }
+  if (id === 'stpur') { filterStaffPurchase.value = []; return }
+  if (id === 'needShoot') { filterNeedShoot.value = null; return }
+  if (id === 'needSample') { filterNeedSample.value = null; return }
+  if (id === 'hasParent') { filterHasParentPlan.value = null; return }
+}
 
 // ── 时效计算 ──────────────────────────────────────────────────────────
 // actual：仅当目标节点已完成时表示「实际完成耗时」天数；未完成则为 null（界面展示 -/-）
 // elapsedDays：用于未完成时的预警/超时判断（上一节点完成日 → 今日）
 // overdueDays：仅 state===overdue 时，超出标准的天数（用于「超时X天」）
-function calcTransitionInfo(prevTl, currTl, transIdx, logisticsName) {
+function calcTransitionInfo(prevTl, currTl, transIdx, logisticsName, firstLegCtx) {
   if (!prevTl?.done) return null
   let cfg = null
-  if (transIdx === 7) cfg = getLogisticsConfig(logisticsName)
-  if (!cfg)           cfg = getTransitionConfig(transIdx, logisticsName)
-  if (!cfg)           return null
+  // 待入仓 → 货件入仓（进入节点 warehouse_received）：优先 物流+国家+目的仓 规则表
+  if (transIdx === 8) {
+    cfg = lookupFirstLegInboundRule({
+      logisticsName,
+      shipCountry: firstLegCtx?.shipCountry,
+      destWarehouse: firstLegCtx?.destWarehouse,
+    })
+  }
+  if (!cfg && transIdx === 7) cfg = getLogisticsConfig(logisticsName)
+  if (!cfg) cfg = getTransitionConfig(transIdx, logisticsName)
+  if (!cfg) return null
 
   const { standard, warning } = cfg
   const startTime = prevTl.time?.slice(0, 10)
@@ -444,6 +892,16 @@ function calcTransitionInfo(prevTl, currTl, transIdx, logisticsName) {
 
   return { standard, state, actual, overdueDays: state === 'overdue' ? overdueDays : 0 }
 }
+
+onMounted(() => {
+  if (defaultViewId.value && savedViews.value.length) {
+    const v = savedViews.value.find(x => x.id === defaultViewId.value)
+    if (v?.snapshot) {
+      applySnapshot(v.snapshot)
+      activeViewId.value = defaultViewId.value
+    }
+  }
+})
 </script>
 
 <template>
@@ -458,33 +916,14 @@ function calcTransitionInfo(prevTl, currTl, transIdx, logisticsName) {
       </div>
     </header>
 
-    <!-- 主体：左侧菜单 + 右侧内容 -->
+    <!-- 主体：列表全宽 -->
     <div class="lt-body">
-
-      <!-- 左侧主状态菜单 -->
-      <aside class="lt-sidebar">
-        <div class="lt-sidebar-title">上架状态</div>
-        <div
-          v-for="tab in mainTabs"
-          :key="tab.key"
-          class="lt-sidebar-item"
-          :class="{ active: mainStatus === tab.key }"
-          @click="mainStatus = tab.key; activeSubNode = null"
-        >
-          <span class="lt-sidebar-label">{{ tab.label }}</span>
-          <span class="lt-sidebar-count" :class="{ 'count-zero': !tabCounts[tab.key] }">
-            {{ tabCounts[tab.key] ?? 0 }}
-          </span>
-        </div>
-      </aside>
-
-      <!-- 右侧内容区 -->
       <div class="lt-content">
 
-        <!-- 筛选区（子组件） -->
         <ListingFilterBar
           v-model:searchField="searchField"
           v-model:searchKeyword="searchKeyword"
+          v-model:searchBatchExact="searchBatchExact"
           v-model:filterListing="filterListing"
           v-model:filterDesign="filterDesign"
           v-model:filterShop="filterShop"
@@ -495,12 +934,86 @@ function calcTransitionInfo(prevTl, currTl, transIdx, logisticsName) {
           v-model:filterSeason="filterSeason"
           v-model:filterTimeField="filterTimeField"
           v-model:filterDateRange="filterDateRange"
+          v-model:filterStatusKeys="filterStatusKeys"
+          v-model:listSort="listSort"
+          v-model:filterAuthMode="filterAuthMode"
+          v-model:filterStaffOps="filterStaffOps"
+          v-model:filterStaffDev="filterStaffDev"
+          v-model:filterStaffDesign="filterStaffDesign"
+          v-model:filterStaffPhoto="filterStaffPhoto"
+          v-model:filterStaffPurchase="filterStaffPurchase"
+          v-model:filterNeedShoot="filterNeedShoot"
+          v-model:filterNeedSample="filterNeedSample"
+          v-model:filterHasParentPlan="filterHasParentPlan"
           @reset="doReset"
-        />
+        >
+          <template #footer>
+            <div class="lt-filter-footer">
+              <div class="lt-view-strip">
+                <el-icon class="lt-view-eye" :size="16"><View /></el-icon>
+                <span class="lt-view-title">系统视图</span>
+                <el-select
+                  v-model="activeViewId"
+                  clearable
+                  filterable
+                  placeholder="选择已保存的查询视图"
+                  size="small"
+                  class="lt-view-select"
+                  @change="onApplyView"
+                >
+                  <el-option
+                    v-for="v in savedViews"
+                    :key="v.id"
+                    :label="(defaultViewId === v.id ? '【默认】' : '') + v.name"
+                    :value="v.id"
+                  />
+                </el-select>
+                <el-dropdown trigger="click" @command="onViewMenuCommand">
+                  <el-button size="small" type="default">
+                    视图管理
+                    <el-icon class="lt-view-caret"><ArrowDown /></el-icon>
+                  </el-button>
+                  <template #dropdown>
+                    <el-dropdown-menu>
+                      <el-dropdown-item command="save-as">另存为视图</el-dropdown-item>
+                      <el-dropdown-item command="update" :disabled="!activeViewId">更新当前视图</el-dropdown-item>
+                      <el-dropdown-item command="default" :disabled="!activeViewId">设为默认</el-dropdown-item>
+                      <el-dropdown-item command="delete" divided :disabled="!activeViewId">删除</el-dropdown-item>
+                    </el-dropdown-menu>
+                  </template>
+                </el-dropdown>
+              </div>
+              <div v-if="filterTags.length" class="lt-tags-wrap">
+                <el-tag
+                  v-for="t in filterTags"
+                  :key="t.id"
+                  closable
+                  type="primary"
+                  size="small"
+                  @close="removeFilterTag(t.id)"
+                >
+                  {{ t.label }}
+                </el-tag>
+                <el-button type="primary" link size="small" @click="doReset">清除全部</el-button>
+              </div>
+            </div>
+          </template>
+        </ListingFilterBar>
+
+        <el-dialog v-model="viewSaveDialog" title="另存为视图" width="400px" destroy-on-close>
+          <el-input v-model="viewSaveName" maxlength="20" show-word-limit placeholder="视图名称（最多20字）" />
+          <template #footer>
+            <el-button @click="viewSaveDialog = false">取消</el-button>
+            <el-button type="primary" @click="onSaveView">保存</el-button>
+          </template>
+        </el-dialog>
 
         <!-- 功能按钮区 -->
         <div class="lt-action-bar">
           <el-button type="primary" size="small">批量上架</el-button>
+          <el-button type="primary" plain size="small" @click="openPurchasePlanFromToolbar">
+            创建采购计划
+          </el-button>
           <el-button size="small">AI文案生成</el-button>
           <el-button size="small">导出</el-button>
           <div class="lt-action-spacer" />
@@ -532,7 +1045,6 @@ function calcTransitionInfo(prevTl, currTl, transIdx, logisticsName) {
 
         <!-- 备货发货子节点统计面板（含货件入仓，筛选联动，仅在备货发货主状态下显示） -->
         <ListingNodeStatusBar
-          v-if="mainStatus === 'stocking'"
           :nodes="STOCKING_PANELS"
           :stats="dynamicNodeStats"
           v-model:active="activeSubNode"
@@ -546,6 +1058,13 @@ function calcTransitionInfo(prevTl, currTl, transIdx, logisticsName) {
 
             <!-- 列头（与 ListingProductRow 列宽保持一致） -->
             <div class="lt-col-header">
+              <div class="lt-col-check lt-col-check--head">
+                <el-checkbox
+                  :model-value="headerSelectAll"
+                  :indeterminate="headerSelectIndeterminate"
+                  @change="onHeaderSelectAll"
+                />
+              </div>
               <div class="lt-col-img">图片</div>
               <div class="lt-col-info">产品信息</div>
               <div class="lt-col-status">状态&节点</div>
@@ -559,10 +1078,9 @@ function calcTransitionInfo(prevTl, currTl, transIdx, logisticsName) {
               <div class="lt-col-time">Listing上传时间</div>
               <div class="lt-col-design">平面状态</div>
               <div class="lt-col-design-time">平面完成时间</div>
-              <div class="lt-col-auth">授权时间</div>
-              <div class="lt-col-ready">可开售时间</div>
+              <div class="lt-col-auth">开发授权时间</div>
               <div class="lt-col-total">总用时</div>
-              <div class="lt-col-logistics">物流</div>
+              <div class="lt-col-logistics">物流方式</div>
               <div class="lt-col-action">操作</div>
             </div>
 
@@ -576,6 +1094,9 @@ function calcTransitionInfo(prevTl, currTl, transIdx, logisticsName) {
               v-for="product in paginatedProducts"
               :key="product.id"
               :product="product"
+              :selected="selectedIds.has(product.id)"
+              @toggle-select="toggleProductSelect(product.id)"
+              @detail="openListingDetail"
             />
           </div>
 
@@ -593,6 +1114,20 @@ function calcTransitionInfo(prevTl, currTl, transIdx, logisticsName) {
         </div>
       </div>
     </div>
+
+    <ListingDetailDrawer
+      v-model="listingDetailOpen"
+      :product="listingDetailProduct"
+      :picker-products="alertedProducts"
+    />
+
+    <PurchasePlanEditorDialog
+      v-model="purchasePlanEditorOpen"
+      :initial-draft-id="null"
+      :prefill-product-ids="purchasePrefillIds"
+      :picker-source="alertedProducts"
+      :editable="true"
+    />
   </div>
 </template>
 
@@ -604,68 +1139,59 @@ function calcTransitionInfo(prevTl, currTl, transIdx, logisticsName) {
   flex-direction: column;
   min-height: 0;
   overflow: hidden;
-  background: #f0f2f5;
+  background: #f5f7fa;
 }
 
-/* ── 主体：左右布局 ── */
+/* ── 主体 ── */
 .lt-body {
   flex: 1;
   display: flex;
-  flex-direction: row;
+  flex-direction: column;
   min-height: 0;
   overflow: hidden;
 }
 
-/* ── 左侧状态菜单 ── */
-.lt-sidebar {
-  width: 160px;
-  flex-shrink: 0;
-  background: #fff;
-  border-right: 1px solid #e8ecf0;
+/* ── 筛选条第 3 行：系统视图 + 已选标签 ── */
+.lt-filter-footer {
   display: flex;
-  flex-direction: column;
-  overflow-y: auto;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 12px;
+  width: 100%;
 }
-.lt-sidebar-title {
-  font-size: 11px;
-  font-weight: 600;
-  color: #9ca3af;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  padding: 14px 16px 8px;
-}
-.lt-sidebar-item {
+.lt-view-strip {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: 9px 16px;
-  cursor: pointer;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.lt-view-eye {
+  color: #409eff;
+  flex-shrink: 0;
+}
+.lt-view-title {
   font-size: 13px;
   color: #374151;
-  border-left: 3px solid transparent;
-  transition: all .15s;
-}
-.lt-sidebar-item:hover { background: #f5f7fa; }
-.lt-sidebar-item.active {
-  background: #e6f4ff;
-  border-left-color: #1890ff;
-  color: #1890ff;
   font-weight: 600;
+  margin-right: 4px;
 }
-.lt-sidebar-label { flex: 1; }
-.lt-sidebar-count {
-  font-size: 12px;
-  background: #f0f2f5;
-  color: #6b7280;
-  padding: 1px 7px;
-  border-radius: 10px;
-  min-width: 22px;
-  text-align: center;
+.lt-view-select {
+  width: 220px;
 }
-.lt-sidebar-item.active .lt-sidebar-count { background: #bae0ff; color: #1890ff; }
-.lt-sidebar-count.count-zero { opacity: .5; }
+.lt-view-caret {
+  margin-left: 4px;
+  vertical-align: middle;
+}
+.lt-tags-wrap {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  min-width: 200px;
+}
 
-/* ── 右侧内容区 ── */
+/* ── 内容区 ── */
 .lt-content {
   flex: 1;
   display: flex;
@@ -681,8 +1207,7 @@ function calcTransitionInfo(prevTl, currTl, transIdx, logisticsName) {
   align-items: center;
   gap: 8px;
   padding: 8px 16px;
-  background: #fff;
-  border-bottom: 1px solid #e8ecf0;
+  background: transparent;
   flex-shrink: 0;
 }
 .lt-action-spacer { flex: 1; }
@@ -705,7 +1230,7 @@ function calcTransitionInfo(prevTl, currTl, transIdx, logisticsName) {
   min-height: 0;
   overflow-y: auto;
   overflow-x: auto;
-  margin-top: 10px;
+  margin-top: 5px;
 }
 
 /* 列宽见 listingTableColumns.css */
@@ -714,20 +1239,26 @@ function calcTransitionInfo(prevTl, currTl, transIdx, logisticsName) {
 .lt-col-header .lt-col-action {
   align-items: center;
 }
+.lt-col-header .lt-col-check--head {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 4px;
+}
 .lt-col-header {
   display: flex;
   align-items: center;
-  background: #fafafa;
-  border: 1px solid #e8ecf0;
-  border-bottom: 2px solid #e0e4ea;
-  border-radius: 6px 6px 0 0;
-  padding: 7px 10px;
+  background: #fff;
+  border: 1px solid #ebeef5;
+  border-radius: 8px 8px 0 0;
+  padding: 5px 8px;
   font-size: 12px;
   font-weight: 600;
-  color: #374151;
+  color: #606266;
   position: sticky;
   top: 0;
   z-index: 10;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.04);
 }
 
 .lt-empty { padding: 40px 0; }
@@ -738,8 +1269,7 @@ function calcTransitionInfo(prevTl, currTl, transIdx, logisticsName) {
   display: flex;
   justify-content: flex-end;
   align-items: center;
-  padding: 8px 4px;
-  border-top: 1px solid #e8ecf0;
-  background: #fff;
+  padding: 6px 4px 8px;
+  background: transparent;
 }
 </style>
