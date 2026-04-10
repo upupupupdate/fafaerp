@@ -5,16 +5,14 @@ import { ArrowDown, View } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { calcTransitionInfo } from '@/features/listing/listingTransitionSla.js'
 import {
-  TRACKING_STATUS_FILTER_OPTIONS,
+  LISTED_SALE_PANELS,
   SUB_NODES,
   STOCKING_FLOW_NODES,
-  TRACKING_STOCKING_PANELS,
-  isExcludedFromListingTracking,
   matchStatusPanelKey,
   resolveMainStatus,
 } from '@/features/listing/listingDefs.js'
 import { allListingProducts } from '@/features/listing/listingMockData.js'
-import { loadListingViews, saveListingViews } from '@/features/listing/listingViewsStorage.js'
+import { loadListingLaunchedViews, saveListingLaunchedViews } from '@/features/listing/listingLaunchedViewsStorage.js'
 import ListingFilterBar     from '@/features/listing/components/ListingFilterBar.vue'
 import ListingNodeStatusBar from '@/features/listing/components/ListingNodeStatusBar.vue'
 import ListingProductRow    from '@/features/listing/components/ListingProductRow.vue'
@@ -25,9 +23,9 @@ import { isListingEligibleForPurchasePlan } from '@/features/listing/purchasePla
 
 const allProducts = allListingProducts
 
-/** 上架跟踪：排除待分配、已开售 */
-const trackingProductPool = computed(() =>
-  allProducts.value.filter((p) => !isExcludedFromListingTracking(p)),
+/** 开售商品：仅主状态为已开售 */
+const launchedProductPool = computed(() =>
+  allProducts.value.filter((p) => resolveMainStatus(p) === 'listed'),
 )
 
 // ── 页面状态 ──────────────────────────────────────────────────────────
@@ -69,7 +67,7 @@ const filterHasParentPlan = ref(null)
 /** null=不限 true=仅超时 false=仅非超时（与 transitionInfos 一致） */
 const filterTimeout = ref(null)
 
-const LIST_DISPLAY_LS = 'listing_tracking_display_mode'
+const LIST_DISPLAY_LS = 'listing_launched_display_mode'
 const listDisplayMode = ref(
   typeof localStorage !== 'undefined' && localStorage.getItem(LIST_DISPLAY_LS) === 'regular'
     ? 'regular'
@@ -93,7 +91,7 @@ const activeSubNode = computed({
 })
 
 // ── 系统视图（localStorage）────────────────────────────────────────────
-const _viewsLoaded = loadListingViews()
+const _viewsLoaded = loadListingLaunchedViews()
 const savedViews = ref(_viewsLoaded.views)
 const defaultViewId = ref(_viewsLoaded.defaultId)
 const activeViewId = ref(null)
@@ -263,7 +261,7 @@ function applySnapshot(s) {
 }
 
 function persistViews() {
-  saveListingViews(savedViews.value, defaultViewId.value)
+  saveListingLaunchedViews(savedViews.value, defaultViewId.value)
 }
 
 function onSaveView() {
@@ -355,7 +353,7 @@ function doReset() {
 }
 
 // ── 统计面板用：仅应用公共/时间/搜索，不按侧栏主状态与状态条筛 ─────────
-const statsBaseFiltered = computed(() => applyCommonFilters([...trackingProductPool.value]))
+const statsBaseFiltered = computed(() => applyCommonFilters([...launchedProductPool.value]))
 
 const statsBaseEnriched = computed(() =>
   statsBaseFiltered.value.map(p => ({
@@ -375,7 +373,7 @@ const statsBaseEnriched = computed(() =>
 const dynamicNodeStats = computed(() => {
   const stats = {}
   const base = statsBaseEnriched.value
-  for (const pan of TRACKING_STOCKING_PANELS) {
+  for (const pan of LISTED_SALE_PANELS) {
     const key = pan.key
     const inNode = base.filter(p => matchStatusPanelKey(p, key))
     const tlIdx = SUB_NODES.findIndex(n => n.key === key)
@@ -399,7 +397,7 @@ const dynamicNodeStats = computed(() => {
 })
 
 const filteredProducts = computed(() => {
-  let list = trackingProductPool.value
+  let list = launchedProductPool.value
 
   if (filterStatusKeys.value.length) {
     list = list.filter(p => filterStatusKeys.value.some(k => matchStatusPanelKey(p, k)))
@@ -564,7 +562,7 @@ const filterTags = computed(() => {
     })
   }
   for (const k of filterStatusKeys.value) {
-    const opt = TRACKING_STATUS_FILTER_OPTIONS.find(o => o.key === k)
+    const opt = LISTED_SALE_PANELS.find(o => o.key === k)
     tags.push({ id: `status:${k}`, label: `节点: ${opt?.label ?? k}` })
   }
   if (filterListing.value) tags.push({ id: 'listing', label: `Listing: ${filterListing.value}` })
@@ -667,7 +665,7 @@ onMounted(() => {
       <div class="header-breadcrumb">
         <span>上架</span>
         <span class="bc-sep">/</span>
-        <span class="bc-cur">上架跟踪</span>
+        <span class="bc-cur">开售商品</span>
       </div>
     </header>
 
@@ -676,7 +674,7 @@ onMounted(() => {
       <div class="lt-content">
 
         <ListingFilterBar
-          :status-filter-options="TRACKING_STATUS_FILTER_OPTIONS"
+          :status-filter-options="LISTED_SALE_PANELS"
           v-model:searchField="searchField"
           v-model:searchKeyword="searchKeyword"
           v-model:searchBatchExact="searchBatchExact"
@@ -807,7 +805,7 @@ onMounted(() => {
 
         <!-- 备货发货子节点统计面板（筛选联动） -->
         <ListingNodeStatusBar
-          :nodes="TRACKING_STOCKING_PANELS"
+          :nodes="LISTED_SALE_PANELS"
           :stats="dynamicNodeStats"
           v-model:active="activeSubNode"
         />

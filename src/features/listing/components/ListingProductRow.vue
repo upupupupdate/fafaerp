@@ -3,6 +3,7 @@
 import '@/features/listing/listingTableColumns.css'
 import { computed } from 'vue'
 import { formatListedTotalUseDays, resolveListStatusLabel } from '@/features/listing/listingDefs.js'
+import { computeDesignListingFlatSla, hasFlatSlaOverdue } from '@/features/listing/listingFlatSla.js'
 import ListingTimeline from './ListingTimeline.vue'
 
 const props = defineProps({
@@ -14,10 +15,15 @@ const props = defineProps({
 const emit = defineEmits(['detail', 'toggle-select'])
 
 const totalUseDisplay = computed(() => formatListedTotalUseDays(props.product))
+
+/** 平面 / Listing 全链路超时（以运营分配日为起点，与时效配置「全链路指标」一致，不并入主时间轴） */
+const flatSla = computed(() =>
+  props.product.flatSla ?? computeDesignListingFlatSla(props.product),
+)
 </script>
 
 <template>
-  <div class="lpr-block">
+  <div class="lpr-block" :class="{ 'lpr-block--overdue': hasRowAnyOverdue }">
     <div class="lpr-body">
       <div class="lt-col-check lt-cell lpr-check-cell" @click.stop>
         <el-checkbox :model-value="selected" @change="emit('toggle-select')" />
@@ -77,13 +83,35 @@ const totalUseDisplay = computed(() => formatListedTotalUseDays(props.product))
           {{ product.listingStatus }}
         </el-tag>
       </div>
-      <div class="lt-col-time   lt-cell lt-cell-sm">{{ product.listingUploadTime || '—' }}</div>
+      <div class="lt-col-time lt-cell lt-cell-sm lpr-sla-cell">
+        <span>{{ product.listingUploadTime || '—' }}</span>
+        <el-tag
+          v-if="flatSla.listingOverdueDays"
+          type="danger"
+          size="small"
+          effect="light"
+          class="lpr-sla-tag"
+        >
+          超时{{ flatSla.listingOverdueDays }}天
+        </el-tag>
+      </div>
       <div class="lt-col-design lt-cell lpr-group-b">
         <el-tag :type="product.designStatus === '完成平面设计' ? 'success' : 'info'" size="small" effect="plain">
           {{ product.designStatus }}
         </el-tag>
       </div>
-      <div class="lt-col-design-time lt-cell lt-cell-sm">{{ product.designCompletedTime || '—' }}</div>
+      <div class="lt-col-design-time lt-cell lt-cell-sm lpr-sla-cell">
+        <span>{{ product.designCompletedTime || '—' }}</span>
+        <el-tag
+          v-if="flatSla.designOverdueDays"
+          type="danger"
+          size="small"
+          effect="light"
+          class="lpr-sla-tag"
+        >
+          超时{{ flatSla.designOverdueDays }}天
+        </el-tag>
+      </div>
 
       <div class="lt-col-auth lt-cell lt-cell-sm">{{ product.authTime || '—' }}</div>
       <div class="lt-col-total lt-cell lt-cell-sm">
@@ -122,6 +150,11 @@ const totalUseDisplay = computed(() => formatListedTotalUseDays(props.product))
 /* 悬浮时时间轴轨道轻微缩放 */
 .lpr-block:hover :deep(.lts-track-bar) {
   transform: scaleY(1.25);
+}
+
+.lpr-block.lpr-block--overdue {
+  border-left: 4px solid #f56c6c;
+  background: linear-gradient(90deg, rgba(245, 108, 108, 0.07) 0%, #fff 48px);
 }
 
 .lpr-body {
@@ -254,4 +287,15 @@ const totalUseDisplay = computed(() => formatListedTotalUseDays(props.product))
 .lpr-action-link:hover { text-decoration: underline; }
 
 .lpr-muted { color: #9ca3af; font-size: 11px; }
+
+.lpr-sla-cell {
+  gap: 4px;
+  align-items: flex-start !important;
+}
+.lpr-sla-tag {
+  margin-top: 2px;
+  max-width: 100%;
+  white-space: normal;
+  line-height: 1.25;
+}
 </style>

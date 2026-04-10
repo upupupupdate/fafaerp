@@ -6,6 +6,7 @@ const route = useRoute()
 
 const productOpen  = ref(true)
 const listingOpen  = ref(true)
+const planOpen     = ref(true)
 
 function isActive(path) {
   return route.path === path || route.path.startsWith(path + '/')
@@ -16,13 +17,22 @@ const productMenuItems = [
   { path: '/product/new-dev', label: '🚀 新品开发' },
   { path: '/product/sample-board', label: '🧵 样板管理' },
   { path: '/product/list',    label: '📋 产品管理' },
+  { path: '/product/categories', label: '🗂️ 品类管理' },
   { path: '/product/config/fabric-color-cards', label: '🎨 面料色卡库' },
   { path: '/product/config/size-library',       label: '📏 尺码库' },
 ]
 
 const listingMenuItems = [
   { path: '/listing/tracking', label: '📦 上架跟踪' },
+  { path: '/listing/launched', label: '🛒 开售商品' },
+  { path: '/listing/tracking-sidebar', label: '上架跟踪（边栏）' },
   { path: '/listing/config',   label: '⚙️ 时效配置' },
+]
+
+const planMenuItems = [
+  { path: '/plan/dev-target',    label: '🎯 开发目标' },
+  { path: '/plan/ops-target',     label: '📈 运营目标' },
+  { path: '/plan/parent-asin',   label: '🧩 父体规划' },
 ]
 
 </script>
@@ -75,6 +85,31 @@ const listingMenuItems = [
         <div class="nav-children" :class="{ open: listingOpen }">
           <router-link
             v-for="item in listingMenuItems"
+            :key="item.path"
+            :to="item.path"
+            class="nav-child"
+            :class="{ active: isActive(item.path) }"
+          >
+            {{ item.label }}
+          </router-link>
+        </div>
+      </div>
+
+      <!-- 计划（位于上架分组下方） -->
+      <div class="nav-section">
+        <button
+          type="button"
+          class="nav-item nav-item-parent"
+          :class="{ open: planOpen }"
+          @click="planOpen = !planOpen"
+        >
+          <i class="ni">📅</i>
+          <span class="nav-label">计划</span>
+          <i class="nav-arrow">▾</i>
+        </button>
+        <div class="nav-children" :class="{ open: planOpen }">
+          <router-link
+            v-for="item in planMenuItems"
             :key="item.path"
             :to="item.path"
             class="nav-child"

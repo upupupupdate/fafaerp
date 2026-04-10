@@ -1,20 +1,20 @@
 <script setup>
 import '@/features/listing/listingTableColumns.css'
 import { computed, onMounted, ref, shallowRef, watch } from 'vue'
-import { ArrowDown, View } from '@element-plus/icons-vue'
+import { ArrowDown, ArrowUp, DArrowLeft, DArrowRight, View } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { calcTransitionInfo } from '@/features/listing/listingTransitionSla.js'
 import {
-  TRACKING_STATUS_FILTER_OPTIONS,
+  STATUS_FILTER_OPTIONS,
   SUB_NODES,
   STOCKING_FLOW_NODES,
-  TRACKING_STOCKING_PANELS,
-  isExcludedFromListingTracking,
+  SIDEBAR_IN_PROGRESS_PANELS,
+  matchSidebarInProgressPanelKey,
   matchStatusPanelKey,
   resolveMainStatus,
 } from '@/features/listing/listingDefs.js'
 import { allListingProducts } from '@/features/listing/listingMockData.js'
-import { loadListingViews, saveListingViews } from '@/features/listing/listingViewsStorage.js'
+import { loadListingSidebarViews, saveListingSidebarViews } from '@/features/listing/listingTrackingSidebarViewsStorage.js'
 import ListingFilterBar     from '@/features/listing/components/ListingFilterBar.vue'
 import ListingNodeStatusBar from '@/features/listing/components/ListingNodeStatusBar.vue'
 import ListingProductRow    from '@/features/listing/components/ListingProductRow.vue'
@@ -22,13 +22,72 @@ import ListingRegularTable  from '@/features/listing/components/ListingRegularTa
 import ListingDetailDrawer  from '@/features/listing/components/ListingDetailDrawer.vue'
 import PurchasePlanEditorDialog from '@/features/listing/components/PurchasePlanEditorDialog.vue'
 import { isListingEligibleForPurchasePlan } from '@/features/listing/purchasePlanDraft.js'
+import { computeDesignListingFlatSla, hasFlatSlaOverdue } from '@/features/listing/listingFlatSla.js'
 
 const allProducts = allListingProducts
 
-/** 上架跟踪：排除待分配、已开售 */
-const trackingProductPool = computed(() =>
-  allProducts.value.filter((p) => !isExcludedFromListingTracking(p)),
+/** 演示页：全量 Mock，不做业务排除（与当前「上架跟踪」对照） */
+
+/** 边栏：全部 / 待分配 / 进行中(备货) / 可开售 / 已开售 */
+const sidebarPhase = ref('all')
+
+const SIDEBAR_COLLAPSED_LS = 'listing_tracking_sidebar_collapsed'
+const sidebarCollapsed = ref(
+  typeof localStorage !== 'undefined' && localStorage.getItem(SIDEBAR_COLLAPSED_LS) === '1',
 )
+
+const QUERY_COLLAPSED_LS = 'listing_tracking_sidebar_query_collapsed'
+const queryCollapsed = ref(
+  typeof localStorage !== 'undefined' && localStorage.getItem(QUERY_COLLAPSED_LS) === '1',
+)
+
+watch(sidebarCollapsed, (v) => {
+  try {
+    localStorage.setItem(SIDEBAR_COLLAPSED_LS, v ? '1' : '0')
+  } catch {
+    /* ignore */
+  }
+})
+
+watch(queryCollapsed, (v) => {
+  try {
+    localStorage.setItem(QUERY_COLLAPSED_LS, v ? '1' : '0')
+  } catch {
+    /* ignore */
+  }
+})
+
+function formatSidebarCount(n) {
+  if (n == null || Number.isNaN(n)) return '0'
+  return Number(n).toLocaleString('zh-CN')
+}
+
+function matchesSidebarPhase(p, phase) {
+  if (phase === 'all') return true
+  const m = resolveMainStatus(p)
+  if (phase === 'pending') return m === 'pending'
+  if (phase === 'stocking') return m === 'stocking'
+  if (phase === 'ready') return m === 'ready'
+  if (phase === 'listed') return m === 'listed'
+  return false
+}
+
+const SIDEBAR_NAV = [
+  { key: 'all', label: '全部' },
+  { key: 'pending', label: '待分配' },
+  { key: 'stocking', label: '进行中' },
+  { key: 'ready', label: '可开售' },
+  { key: 'listed', label: '已开售' },
+]
+
+const sidebarStatusFilterOptions = computed(() => {
+  if (sidebarPhase.value === 'all') return STATUS_FILTER_OPTIONS
+  if (sidebarPhase.value === 'stocking') return SIDEBAR_IN_PROGRESS_PANELS
+  if (sidebarPhase.value === 'pending') return [{ key: 'pending', label: '待分配' }]
+  if (sidebarPhase.value === 'ready') return [{ key: 'ready_to_sell', label: '可开售' }]
+  if (sidebarPhase.value === 'listed') return [{ key: 'listed_sale', label: '已开售' }]
+  return STATUS_FILTER_OPTIONS
+})
 
 // ── 页面状态 ──────────────────────────────────────────────────────────
 const alertFilter = ref(null) // null | 'overdue' | 'warning'
@@ -36,7 +95,7 @@ const currentPage   = ref(1)
 const PAGE_SIZE     = 50
 
 // ── 筛选状态 ──────────────────────────────────────────────────────────
-const searchField = ref('name')
+const searchField = ref('sku')
 const searchKeyword = ref('')
 /** true：批量精准（多值与当前字段全等，OR）；false：模糊 + 引号全等 */
 const searchBatchExact = ref(false)
@@ -69,7 +128,7 @@ const filterHasParentPlan = ref(null)
 /** null=不限 true=仅超时 false=仅非超时（与 transitionInfos 一致） */
 const filterTimeout = ref(null)
 
-const LIST_DISPLAY_LS = 'listing_tracking_display_mode'
+const LIST_DISPLAY_LS = 'listing_tracking_sidebar_display_mode'
 const listDisplayMode = ref(
   typeof localStorage !== 'undefined' && localStorage.getItem(LIST_DISPLAY_LS) === 'regular'
     ? 'regular'
@@ -93,7 +152,7 @@ const activeSubNode = computed({
 })
 
 // ── 系统视图（localStorage）────────────────────────────────────────────
-const _viewsLoaded = loadListingViews()
+const _viewsLoaded = loadListingSidebarViews()
 const savedViews = ref(_viewsLoaded.views)
 const defaultViewId = ref(_viewsLoaded.defaultId)
 const activeViewId = ref(null)
@@ -105,9 +164,13 @@ watch(
    filterPType, filterCategory, filterScene, filterSeason, filterStatusKeys, alertFilter,
    filterTimeField, filterDateRange, listSort, filterAuthMode,
    filterStaffOps, filterStaffDev, filterStaffDesign, filterStaffPhoto, filterStaffPurchase,
-   filterNeedShoot, filterNeedSample, filterHasParentPlan, filterTimeout],
+   filterNeedShoot, filterNeedSample, filterHasParentPlan, filterTimeout, sidebarPhase],
   () => { currentPage.value = 1 },
 )
+
+watch(sidebarPhase, () => {
+  filterStatusKeys.value = []
+})
 
 /** 系统视图快照：旧版为单选字符串，现统一为多选数组 */
 function normStrArr(v) {
@@ -201,6 +264,7 @@ function applyCommonFilters(list) {
 
 function buildSnapshot() {
   return {
+    sidebarPhase: sidebarPhase.value,
     filterStatusKeys: [...filterStatusKeys.value],
     searchField: searchField.value,
     searchKeyword: searchKeyword.value,
@@ -227,13 +291,18 @@ function buildSnapshot() {
     filterNeedSample: filterNeedSample.value,
     filterHasParentPlan: filterHasParentPlan.value,
     filterTimeout: filterTimeout.value,
+    listDisplayMode: listDisplayMode.value,
   }
 }
 
 function applySnapshot(s) {
   if (!s) return
+  const sp = s.sidebarPhase
+  if (sp === 'all' || sp === 'pending' || sp === 'stocking' || sp === 'ready' || sp === 'listed') {
+    sidebarPhase.value = sp
+  }
   filterStatusKeys.value = Array.isArray(s.filterStatusKeys) ? [...s.filterStatusKeys] : []
-  searchField.value = s.searchField ?? 'name'
+  searchField.value = s.searchField ?? 'sku'
   searchKeyword.value = s.searchKeyword ?? ''
   searchBatchExact.value = !!s.searchBatchExact
   filterListing.value = s.filterListing ?? ''
@@ -260,10 +329,11 @@ function applySnapshot(s) {
     s.filterHasParentPlan === true || s.filterHasParentPlan === false ? s.filterHasParentPlan : null
   filterTimeout.value =
     s.filterTimeout === true || s.filterTimeout === false ? s.filterTimeout : null
+  listDisplayMode.value = s.listDisplayMode === 'regular' ? 'regular' : 'progress'
 }
 
 function persistViews() {
-  saveListingViews(savedViews.value, defaultViewId.value)
+  saveListingSidebarViews(savedViews.value, defaultViewId.value)
 }
 
 function onSaveView() {
@@ -326,7 +396,7 @@ function onUpdateCurrentView() {
 
 function doReset() {
   searchKeyword.value = ''
-  searchField.value = 'name'
+  searchField.value = 'sku'
   searchBatchExact.value = false
   filterListing.value = ''
   filterDesign.value = ''
@@ -352,10 +422,26 @@ function doReset() {
   filterHasParentPlan.value = null
   filterTimeout.value = null
   activeViewId.value = null
+  sidebarPhase.value = 'all'
 }
 
 // ── 统计面板用：仅应用公共/时间/搜索，不按侧栏主状态与状态条筛 ─────────
-const statsBaseFiltered = computed(() => applyCommonFilters([...trackingProductPool.value]))
+const statsBaseFiltered = computed(() => applyCommonFilters([...allProducts.value]))
+
+/** 边栏状态数量（与筛选条联动，不按边栏选中项过滤） */
+const sidebarCounts = computed(() => {
+  const base = statsBaseFiltered.value.map((p) => ({
+    ...p,
+    mainStatus: resolveMainStatus(p),
+  }))
+  return {
+    all: base.length,
+    pending: base.filter((p) => p.mainStatus === 'pending').length,
+    stocking: base.filter((p) => p.mainStatus === 'stocking').length,
+    ready: base.filter((p) => p.mainStatus === 'ready').length,
+    listed: base.filter((p) => p.mainStatus === 'listed').length,
+  }
+})
 
 const statsBaseEnriched = computed(() =>
   statsBaseFiltered.value.map(p => ({
@@ -372,26 +458,34 @@ const statsBaseEnriched = computed(() =>
   })),
 )
 
-const dynamicNodeStats = computed(() => {
+/** 仅「进行中」：8 张面板（含货件入仓） */
+const dynamicInProgressStats = computed(() => {
   const stats = {}
-  const base = statsBaseEnriched.value
-  for (const pan of TRACKING_STOCKING_PANELS) {
+  const base = statsBaseEnriched.value.filter((p) => resolveMainStatus(p) === 'stocking')
+  for (const pan of SIDEBAR_IN_PROGRESS_PANELS) {
     const key = pan.key
-    const inNode = base.filter(p => matchStatusPanelKey(p, key))
-    const tlIdx = SUB_NODES.findIndex(n => n.key === key)
-    if (tlIdx >= 0 && STOCKING_FLOW_NODES.some(n => n.key === key)) {
+    const inNode = base.filter((p) => matchSidebarInProgressPanelKey(p, key))
+    const tlIdx = SUB_NODES.findIndex((n) => n.key === key)
+    if (key === 'warehouse_inbound') {
       stats[key] = {
         total: inNode.length,
-        warning: inNode.filter(p => p.transitionInfos[tlIdx]?.state === 'warning').length,
+        warning: inNode.filter((p) => p.transitionInfos.some((t) => t?.state === 'warning')).length,
+        overdue: inNode.filter((p) => p.transitionInfos.some((t) => t?.state === 'overdue')).length,
+      }
+    } else if (tlIdx >= 0 && STOCKING_FLOW_NODES.some((n) => n.key === key)) {
+      stats[key] = {
+        total: inNode.length,
+        warning: inNode.filter((p) => p.transitionInfos[tlIdx]?.state === 'warning').length,
         overdue: inNode.filter(
-          p => p.transitionInfos[tlIdx]?.state === 'overdue' || p.timeline[tlIdx]?.overdue === true,
+          (p) =>
+            p.transitionInfos[tlIdx]?.state === 'overdue' || p.timeline[tlIdx]?.overdue === true,
         ).length,
       }
     } else {
       stats[key] = {
         total: inNode.length,
-        warning: inNode.filter(p => p.transitionInfos.some(t => t?.state === 'warning')).length,
-        overdue: inNode.filter(p => p.transitionInfos.some(t => t?.state === 'overdue')).length,
+        warning: inNode.filter((p) => p.transitionInfos.some((t) => t?.state === 'warning')).length,
+        overdue: inNode.filter((p) => p.transitionInfos.some((t) => t?.state === 'overdue')).length,
       }
     }
   }
@@ -399,17 +493,24 @@ const dynamicNodeStats = computed(() => {
 })
 
 const filteredProducts = computed(() => {
-  let list = trackingProductPool.value
+  let list = applyCommonFilters([...allProducts.value])
+
+  list = list.filter((p) => matchesSidebarPhase(p, sidebarPhase.value))
 
   if (filterStatusKeys.value.length) {
-    list = list.filter(p => filterStatusKeys.value.some(k => matchStatusPanelKey(p, k)))
+    if (sidebarPhase.value === 'stocking') {
+      list = list.filter((p) =>
+        filterStatusKeys.value.some((k) => matchSidebarInProgressPanelKey(p, k)),
+      )
+    } else {
+      list = list.filter((p) => filterStatusKeys.value.some((k) => matchStatusPanelKey(p, k)))
+    }
   }
-
-  list = applyCommonFilters(list)
 
   let mapped = list.map(p => ({
     ...p,
     mainStatus: resolveMainStatus(p),
+    flatSla: computeDesignListingFlatSla(p),
     transitionInfos: p.timeline.map((tl, idx) =>
       idx === 0
         ? null
@@ -421,9 +522,15 @@ const filteredProducts = computed(() => {
   }))
 
   if (filterTimeout.value === true) {
-    mapped = mapped.filter(p => p.transitionInfos.some(t => t?.state === 'overdue'))
+    mapped = mapped.filter(
+      p =>
+        p.transitionInfos.some(t => t?.state === 'overdue') || hasFlatSlaOverdue(p),
+    )
   } else if (filterTimeout.value === false) {
-    mapped = mapped.filter(p => !p.transitionInfos.some(t => t?.state === 'overdue'))
+    mapped = mapped.filter(
+      p =>
+        !p.transitionInfos.some(t => t?.state === 'overdue') && !hasFlatSlaOverdue(p),
+    )
   }
 
   return mapped
@@ -431,7 +538,10 @@ const filteredProducts = computed(() => {
 
 // 超时/预警：含「当前进行中已超时」与「已结束但环节曾超时」（已开售同样统计，与右上角「超时」筛选一致）
 const overdueCount = computed(() =>
-  filteredProducts.value.filter(p => p.transitionInfos.some(t => t?.state === 'overdue')).length
+  filteredProducts.value.filter(
+    p =>
+      p.transitionInfos.some(t => t?.state === 'overdue') || hasFlatSlaOverdue(p),
+  ).length,
 )
 const warningCount = computed(() =>
   filteredProducts.value.filter(p => p.transitionInfos.some(t => t?.state === 'warning')).length
@@ -441,7 +551,10 @@ const warningCount = computed(() =>
 const alertedProducts = computed(() => {
   if (!alertFilter.value) return filteredProducts.value
   if (alertFilter.value === 'overdue') {
-    return filteredProducts.value.filter(p => p.transitionInfos.some(t => t?.state === 'overdue'))
+    return filteredProducts.value.filter(
+      p =>
+        p.transitionInfos.some(t => t?.state === 'overdue') || hasFlatSlaOverdue(p),
+    )
   }
   if (alertFilter.value === 'warning') {
     return filteredProducts.value.filter(p => p.transitionInfos.some(t => t?.state === 'warning'))
@@ -564,7 +677,9 @@ const filterTags = computed(() => {
     })
   }
   for (const k of filterStatusKeys.value) {
-    const opt = TRACKING_STATUS_FILTER_OPTIONS.find(o => o.key === k)
+    const opt =
+      SIDEBAR_IN_PROGRESS_PANELS.find((o) => o.key === k)
+      || STATUS_FILTER_OPTIONS.find((o) => o.key === k)
     tags.push({ id: `status:${k}`, label: `节点: ${opt?.label ?? k}` })
   }
   if (filterListing.value) tags.push({ id: 'listing', label: `Listing: ${filterListing.value}` })
@@ -667,95 +782,163 @@ onMounted(() => {
       <div class="header-breadcrumb">
         <span>上架</span>
         <span class="bc-sep">/</span>
-        <span class="bc-cur">上架跟踪</span>
+        <span class="bc-cur">上架跟踪（边栏）</span>
       </div>
     </header>
 
-    <!-- 主体：列表全宽 -->
-    <div class="lt-body">
-      <div class="lt-content">
-
-        <ListingFilterBar
-          :status-filter-options="TRACKING_STATUS_FILTER_OPTIONS"
-          v-model:searchField="searchField"
-          v-model:searchKeyword="searchKeyword"
-          v-model:searchBatchExact="searchBatchExact"
-          v-model:filterListing="filterListing"
-          v-model:filterDesign="filterDesign"
-          v-model:filterShop="filterShop"
-          v-model:filterBrand="filterBrand"
-          v-model:filterPType="filterPType"
-          v-model:filterCategory="filterCategory"
-          v-model:filterScene="filterScene"
-          v-model:filterSeason="filterSeason"
-          v-model:filterTimeField="filterTimeField"
-          v-model:filterDateRange="filterDateRange"
-          v-model:filterStatusKeys="filterStatusKeys"
-          v-model:listSort="listSort"
-          v-model:filterAuthMode="filterAuthMode"
-          v-model:filterStaffOps="filterStaffOps"
-          v-model:filterStaffDev="filterStaffDev"
-          v-model:filterStaffDesign="filterStaffDesign"
-          v-model:filterStaffPhoto="filterStaffPhoto"
-          v-model:filterStaffPurchase="filterStaffPurchase"
-          v-model:filterNeedShoot="filterNeedShoot"
-          v-model:filterNeedSample="filterNeedSample"
-          v-model:filterHasParentPlan="filterHasParentPlan"
-          v-model:filterTimeout="filterTimeout"
-          @reset="doReset"
+    <!-- 主体：左侧边栏 + 内容区 -->
+    <div class="lt-body lt-body-with-sidebar">
+      <div class="lt-sidebar-outer" :class="{ 'is-collapsed': sidebarCollapsed }">
+        <template v-if="!sidebarCollapsed">
+          <aside
+            class="lt-sidebar-phase"
+            aria-label="上架主状态"
+          >
+            <button
+              v-for="nav in SIDEBAR_NAV"
+              :key="nav.key"
+              type="button"
+              class="lt-sidebar-phase-item"
+              :class="{ 'is-active': sidebarPhase === nav.key }"
+              @click="sidebarPhase = nav.key"
+            >
+              <span class="lt-sidebar-phase-line">
+                {{ nav.label }} ({{ formatSidebarCount(sidebarCounts[nav.key]) }})
+              </span>
+            </button>
+          </aside>
+          <button
+            type="button"
+            class="lt-sidebar-edge-collapse"
+            aria-label="收起边栏"
+            @click="sidebarCollapsed = true"
+          >
+            <el-icon :size="13" class="lt-sidebar-edge-collapse-icon"><DArrowLeft /></el-icon>
+            <span class="lt-sidebar-edge-collapse-text">收起</span>
+          </button>
+        </template>
+        <aside
+          v-else
+          class="lt-sidebar-rail"
+          aria-label="展开边栏"
         >
-          <template #footer>
-            <div class="lt-filter-footer">
-              <div class="lt-view-strip">
-                <el-icon class="lt-view-eye" :size="16"><View /></el-icon>
-                <span class="lt-view-title">系统视图</span>
-                <el-select
-                  v-model="activeViewId"
-                  clearable
-                  filterable
-                  placeholder="选择已保存的查询视图"
-                  size="small"
-                  class="lt-view-select"
-                  @change="onApplyView"
-                >
-                  <el-option
-                    v-for="v in savedViews"
-                    :key="v.id"
-                    :label="(defaultViewId === v.id ? '【默认】' : '') + v.name"
-                    :value="v.id"
-                  />
-                </el-select>
-                <el-dropdown trigger="click" @command="onViewMenuCommand">
-                  <el-button size="small" type="default">
-                    视图管理
-                    <el-icon class="lt-view-caret"><ArrowDown /></el-icon>
-                  </el-button>
-                  <template #dropdown>
-                    <el-dropdown-menu>
-                      <el-dropdown-item command="save-as">另存为视图</el-dropdown-item>
-                      <el-dropdown-item command="update" :disabled="!activeViewId">更新当前视图</el-dropdown-item>
-                      <el-dropdown-item command="default" :disabled="!activeViewId">设为默认</el-dropdown-item>
-                      <el-dropdown-item command="delete" divided :disabled="!activeViewId">删除</el-dropdown-item>
-                    </el-dropdown-menu>
-                  </template>
-                </el-dropdown>
+          <button
+            type="button"
+            class="lt-sidebar-rail-btn"
+            @click="sidebarCollapsed = false"
+          >
+            <el-icon :size="14"><DArrowRight /></el-icon>
+            <span class="lt-sidebar-rail-text">展开</span>
+          </button>
+        </aside>
+      </div>
+
+      <div class="lt-content lt-content-main">
+        <template v-if="!queryCollapsed">
+        <div class="lt-query-block">
+          <ListingFilterBar
+            :status-filter-options="sidebarStatusFilterOptions"
+            v-model:searchField="searchField"
+            v-model:searchKeyword="searchKeyword"
+            v-model:searchBatchExact="searchBatchExact"
+            v-model:filterListing="filterListing"
+            v-model:filterDesign="filterDesign"
+            v-model:filterShop="filterShop"
+            v-model:filterBrand="filterBrand"
+            v-model:filterPType="filterPType"
+            v-model:filterCategory="filterCategory"
+            v-model:filterScene="filterScene"
+            v-model:filterSeason="filterSeason"
+            v-model:filterTimeField="filterTimeField"
+            v-model:filterDateRange="filterDateRange"
+            v-model:filterStatusKeys="filterStatusKeys"
+            v-model:listSort="listSort"
+            v-model:filterAuthMode="filterAuthMode"
+            v-model:filterStaffOps="filterStaffOps"
+            v-model:filterStaffDev="filterStaffDev"
+            v-model:filterStaffDesign="filterStaffDesign"
+            v-model:filterStaffPhoto="filterStaffPhoto"
+            v-model:filterStaffPurchase="filterStaffPurchase"
+            v-model:filterNeedShoot="filterNeedShoot"
+            v-model:filterNeedSample="filterNeedSample"
+            v-model:filterHasParentPlan="filterHasParentPlan"
+            v-model:filterTimeout="filterTimeout"
+            @reset="doReset"
+          >
+            <template #footer>
+              <div class="lt-filter-footer">
+                <div class="lt-view-strip">
+                  <el-icon class="lt-view-eye" :size="16"><View /></el-icon>
+                  <span class="lt-view-title">系统视图</span>
+                  <el-select
+                    v-model="activeViewId"
+                    clearable
+                    filterable
+                    placeholder="选择已保存的查询视图"
+                    size="small"
+                    class="lt-view-select"
+                    @change="onApplyView"
+                  >
+                    <el-option
+                      v-for="v in savedViews"
+                      :key="v.id"
+                      :label="(defaultViewId === v.id ? '【默认】' : '') + v.name"
+                      :value="v.id"
+                    />
+                  </el-select>
+                  <el-dropdown trigger="click" @command="onViewMenuCommand">
+                    <el-button size="small" type="default">
+                      视图管理
+                      <el-icon class="lt-view-caret"><ArrowDown /></el-icon>
+                    </el-button>
+                    <template #dropdown>
+                      <el-dropdown-menu>
+                        <el-dropdown-item command="save-as">另存为视图</el-dropdown-item>
+                        <el-dropdown-item command="update" :disabled="!activeViewId">更新当前视图</el-dropdown-item>
+                        <el-dropdown-item command="default" :disabled="!activeViewId">设为默认</el-dropdown-item>
+                        <el-dropdown-item command="delete" divided :disabled="!activeViewId">删除</el-dropdown-item>
+                      </el-dropdown-menu>
+                    </template>
+                  </el-dropdown>
+                </div>
+                <div v-if="filterTags.length" class="lt-tags-wrap">
+                  <el-tag
+                    v-for="t in filterTags"
+                    :key="t.id"
+                    closable
+                    type="primary"
+                    size="small"
+                    @close="removeFilterTag(t.id)"
+                  >
+                    {{ t.label }}
+                  </el-tag>
+                  <el-button type="primary" link size="small" @click="doReset">清除全部</el-button>
+                </div>
               </div>
-              <div v-if="filterTags.length" class="lt-tags-wrap">
-                <el-tag
-                  v-for="t in filterTags"
-                  :key="t.id"
-                  closable
-                  type="primary"
-                  size="small"
-                  @close="removeFilterTag(t.id)"
-                >
-                  {{ t.label }}
-                </el-tag>
-                <el-button type="primary" link size="small" @click="doReset">清除全部</el-button>
-              </div>
-            </div>
-          </template>
-        </ListingFilterBar>
+            </template>
+          </ListingFilterBar>
+          <div class="lt-query-collapse-bar">
+            <button
+              type="button"
+              class="lt-query-collapse-btn"
+              @click="queryCollapsed = true"
+            >
+              <el-icon :size="14"><ArrowUp /></el-icon>
+              <span>收起查询区</span>
+            </button>
+          </div>
+        </div>
+        </template>
+
+        <div
+          v-else
+          class="lt-query-collapsed-strip"
+        >
+          <span class="lt-query-collapsed-hint">筛选条件与系统视图已收起</span>
+          <el-button type="primary" link size="small" @click="queryCollapsed = false">
+            展开查询区
+          </el-button>
+        </div>
 
         <el-dialog v-model="viewSaveDialog" title="另存为视图" width="400px" destroy-on-close>
           <el-input v-model="viewSaveName" maxlength="20" show-word-limit placeholder="视图名称（最多20字）" />
@@ -805,10 +988,11 @@ onMounted(() => {
           </el-button>
         </div>
 
-        <!-- 备货发货子节点统计面板（筛选联动） -->
+        <!-- 进行中：8 张面板（货件入仓=到仓+平面待完成） -->
         <ListingNodeStatusBar
-          :nodes="TRACKING_STOCKING_PANELS"
-          :stats="dynamicNodeStats"
+          v-if="sidebarPhase === 'stocking'"
+          :nodes="SIDEBAR_IN_PROGRESS_PANELS"
+          :stats="dynamicInProgressStats"
           v-model:active="activeSubNode"
         />
 
@@ -919,6 +1103,202 @@ onMounted(() => {
   flex-direction: column;
   min-height: 0;
   overflow: hidden;
+}
+
+.lt-body-with-sidebar {
+  flex-direction: row;
+  align-items: stretch;
+}
+
+.lt-sidebar-outer {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
+  min-height: 0;
+}
+
+.lt-sidebar-outer.is-collapsed {
+  flex: 0 0 40px;
+}
+
+.lt-sidebar-phase {
+  width: 200px;
+  flex: 0 0 200px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 8px 8px;
+  background: #eef2f6;
+  border-right: none;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+/* 侧边竖条：左箭头 + 纵向「收起」，贴主内容一侧圆角 */
+.lt-sidebar-edge-collapse {
+  flex: 0 0 22px;
+  width: 22px;
+  min-height: 0;
+  align-self: stretch;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 10px 0;
+  margin: 0;
+  border: none;
+  border-left: 1px solid #e4e7ed;
+  border-radius: 0 8px 8px 0;
+  background: #e8ecf0;
+  color: #606266;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.lt-sidebar-edge-collapse:hover {
+  background: #dde3ea;
+  color: #409eff;
+}
+
+.lt-sidebar-edge-collapse-icon {
+  flex-shrink: 0;
+}
+
+.lt-sidebar-edge-collapse-text {
+  writing-mode: vertical-rl;
+  font-size: 12px;
+  letter-spacing: 0.14em;
+  line-height: 1.2;
+}
+
+.lt-sidebar-phase-item {
+  display: block;
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid #dcdfe6;
+  border-radius: 6px;
+  background: #fff;
+  cursor: pointer;
+  text-align: left;
+  font-size: 13px;
+  color: #303133;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.lt-sidebar-phase-line {
+  display: block;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-weight: 500;
+}
+
+.lt-sidebar-phase-item:hover {
+  border-color: #c6e2ff;
+  box-shadow: 0 2px 8px rgba(64, 158, 255, 0.12);
+}
+
+.lt-sidebar-phase-item.is-active {
+  border-color: #409eff;
+  box-shadow: 0 2px 10px rgba(64, 158, 255, 0.2);
+  background: #ecf5ff;
+}
+
+.lt-sidebar-phase-item.is-active .lt-sidebar-phase-line {
+  font-weight: 600;
+  color: #409eff;
+}
+
+.lt-sidebar-rail {
+  flex: 0 0 40px;
+  width: 40px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  padding-top: 12px;
+  background: #e8ecf0;
+  border-right: 1px solid #dcdfe6;
+}
+
+.lt-sidebar-rail-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 4px;
+  border: none;
+  background: transparent;
+  color: #606266;
+  cursor: pointer;
+  border-radius: 6px;
+}
+
+.lt-sidebar-rail-btn:hover {
+  color: #409eff;
+  background: rgba(255, 255, 255, 0.8);
+}
+
+.lt-sidebar-rail-text {
+  writing-mode: vertical-rl;
+  font-size: 12px;
+  letter-spacing: 0.12em;
+}
+
+.lt-query-block {
+  flex-shrink: 0;
+}
+
+.lt-query-collapse-bar {
+  display: flex;
+  justify-content: center;
+  padding: 4px 0 8px;
+  background: #fff;
+  border-bottom: 1px solid #e8ecf0;
+}
+
+.lt-query-collapse-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  border: none;
+  background: transparent;
+  color: #909399;
+  font-size: 12px;
+  cursor: pointer;
+  border-radius: 4px;
+}
+
+.lt-query-collapse-btn:hover {
+  color: #409eff;
+  background: #f5f7fa;
+}
+
+.lt-query-collapsed-strip {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 10px 16px;
+  background: #fff;
+  border-bottom: 1px solid #e8ecf0;
+  flex-shrink: 0;
+}
+
+.lt-query-collapsed-hint {
+  font-size: 13px;
+  color: #909399;
+}
+
+.lt-content-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
 }
 
 /* ── 筛选条第 3 行：系统视图 + 已选标签 ── */

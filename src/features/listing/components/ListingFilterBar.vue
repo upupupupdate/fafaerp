@@ -4,6 +4,15 @@ import { computed, ref, useSlots, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { LISTING_STAFF_OPTIONS, STATUS_FILTER_OPTIONS } from '@/features/listing/listingDefs.js'
 
+const props = defineProps({
+  /** 状态多选选项；不传则与上架跟踪全量一致 */
+  statusFilterOptions: { type: Array, default: null },
+})
+
+const statusOptionsResolved = computed(() =>
+  props.statusFilterOptions?.length ? props.statusFilterOptions : STATUS_FILTER_OPTIONS,
+)
+
 const SHOPS = ['US站', 'UK站', 'DE站', 'JP站', 'CA站', 'AU站']
 const CATS = ['个护', '美妆', '户外', '家居', '母婴', '运动', '数码', '服饰', '文具', '食品', '宠物', '厨具']
 const SCENES = ['防晒', '日妆', '运动', '收纳', '护肤', '健身', '露营', '通勤', '居家', '学习']
@@ -36,6 +45,8 @@ const filterStaffPurchase = defineModel('filterStaffPurchase', { default: () => 
 const filterNeedShoot = defineModel('filterNeedShoot', { default: null })
 const filterNeedSample = defineModel('filterNeedSample', { default: null })
 const filterHasParentPlan = defineModel('filterHasParentPlan', { default: null })
+/** null=不限 true=仅超时 false=仅非超时 */
+const filterTimeout = defineModel('filterTimeout', { default: null })
 
 const emit = defineEmits(['reset'])
 const slots = useSlots()
@@ -123,6 +134,7 @@ function clearMoreFilters() {
   filterNeedShoot.value = null
   filterNeedSample.value = null
   filterHasParentPlan.value = null
+  filterTimeout.value = null
 }
 
 function closeMorePopover() {
@@ -145,7 +157,7 @@ function closeMorePopover() {
         class="lfb-status-multi"
       >
         <el-option
-          v-for="o in STATUS_FILTER_OPTIONS"
+          v-for="o in statusOptionsResolved"
           :key="o.key"
           :label="o.label"
           :value="o.key"
@@ -160,6 +172,18 @@ function closeMorePopover() {
       <el-select v-model="filterDesign" placeholder="平面状态" clearable size="small" class="lfb-sel">
         <el-option label="待平面设计" value="待平面设计" />
         <el-option label="完成平面设计" value="完成平面设计" />
+      </el-select>
+
+      <el-select
+        v-model="filterTimeout"
+        placeholder="超时"
+        clearable
+        size="small"
+        class="lfb-sel"
+        style="width: 88px"
+      >
+        <el-option label="是" :value="true" />
+        <el-option label="否" :value="false" />
       </el-select>
 
       <el-select

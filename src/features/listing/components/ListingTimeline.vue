@@ -373,7 +373,7 @@ function timeLine(tl, idx) {
   justify-content: center;
 }
 
-/* 详情抽屉：紧凑扁平 11 节点 */
+/* 详情抽屉：紧凑扁平 10 节点 */
 .lts-row--compact {
   padding: 0 4px 2px;
   border-bottom: none;

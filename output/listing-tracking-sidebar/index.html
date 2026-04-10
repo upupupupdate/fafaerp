@@ -1,0 +1,1089 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>上架跟踪（边栏）— UI 原型</title>
+  <style>
+    /* ========== 扁平化 · 蓝色主色 · 响应式基线 ========== */
+    :root {
+      --blue: #1890ff;
+      --blue-dark: #096dd9;
+      --blue-light: #e6f7ff;
+      --text: #262626;
+      --text-sec: #8c8c8c;
+      --border: #f0f0f0;
+      --bg: #f5f7fa;
+      --card-bg: #fff;
+      --radius: 6px;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; height: 100%; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif; font-size: 14px; color: var(--text); background: var(--bg); }
+    button.btn-primary {
+      background: var(--blue) !important;
+      color: #fff !important;
+      border: 1px solid var(--blue) !important;
+      border-radius: var(--radius);
+      padding: 6px 14px;
+      cursor: pointer;
+      font-size: 13px;
+    }
+    button.btn-primary:hover { background: var(--blue-dark) !important; border-color: var(--blue-dark) !important; }
+    button.btn-default {
+      background: #fff;
+      border: 1px solid #d9d9d9;
+      border-radius: var(--radius);
+      padding: 6px 14px;
+      cursor: pointer;
+      font-size: 13px;
+    }
+    .app-root { display: flex; height: 100%; min-height: 480px; overflow: hidden; }
+
+    /* ERP 左侧主导航 */
+    .erp-nav {
+      width: 208px;
+      flex-shrink: 0;
+      background: var(--card-bg);
+      border-right: 1px solid var(--border);
+      padding: 12px 0;
+      display: flex;
+      flex-direction: column;
+    }
+    .erp-logo { padding: 0 16px 12px; font-weight: 700; font-size: 15px; border-bottom: 1px solid var(--border); margin-bottom: 8px; color: var(--blue); }
+    .erp-nav-title { padding: 8px 16px 4px; font-size: 12px; color: var(--text-sec); }
+    .erp-nav a {
+      display: block;
+      padding: 8px 16px;
+      color: #595959;
+      text-decoration: none;
+      font-size: 13px;
+    }
+    .erp-nav a:hover { background: #fafafa; }
+    .erp-nav a.active { background: var(--blue-light); color: var(--blue); font-weight: 600; }
+
+    /* 多标签（原型） */
+    .tab-strip {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px;
+      padding: 8px 16px 0;
+      background: var(--card-bg);
+      border-bottom: 1px solid var(--border);
+    }
+    .tab-strip button {
+      padding: 8px 14px;
+      border: 1px solid transparent;
+      border-bottom: none;
+      border-radius: var(--radius) var(--radius) 0 0;
+      background: #fafafa;
+      cursor: pointer;
+      font-size: 13px;
+      color: #595959;
+    }
+    .tab-strip button.is-active {
+      background: var(--bg);
+      border-color: var(--border);
+      color: var(--blue);
+      font-weight: 600;
+    }
+
+    .main-col { flex: 1; min-width: 0; display: flex; flex-direction: column; background: var(--bg); }
+
+    .bc-header {
+      flex-shrink: 0;
+      padding: 12px 20px;
+      background: var(--card-bg);
+      border-bottom: 1px solid var(--border);
+      font-size: 14px;
+    }
+    .bc-cur { font-weight: 600; }
+
+    .body-row { flex: 1; min-height: 0; display: flex; flex-direction: row; align-items: stretch; }
+
+    /* 主状态边栏 */
+    .phase-sidebar {
+      width: 200px;
+      flex: 0 0 200px;
+      background: #eef2f6;
+      padding: 10px 8px;
+      overflow: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .phase-sidebar.hidden { display: none; }
+    .phase-rail {
+      width: 40px;
+      flex: 0 0 40px;
+      background: #eef2f6;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .phase-btn {
+      width: 100%;
+      text-align: left;
+      padding: 8px 10px;
+      border: 1px solid #dcdfe6;
+      border-radius: var(--radius);
+      background: #fff;
+      cursor: pointer;
+      font-size: 13px;
+      transition: box-shadow 0.15s, border-color 0.15s;
+    }
+    .phase-btn:hover { border-color: #91d5ff; }
+    .phase-btn.is-active {
+      border-color: var(--blue);
+      background: var(--blue-light);
+      color: var(--blue);
+      font-weight: 600;
+      box-shadow: 0 2px 8px rgba(24, 144, 255, 0.2);
+    }
+    .edge-collapse {
+      width: 22px;
+      flex: 0 0 22px;
+      align-self: stretch;
+      border: none;
+      border-left: 1px solid #e4e7ed;
+      border-radius: 0 8px 8px 0;
+      background: #e8ecf0;
+      cursor: pointer;
+      writing-mode: vertical-rl;
+      font-size: 12px;
+      letter-spacing: 0.1em;
+      color: #606266;
+    }
+    .edge-collapse:hover { color: var(--blue); background: #dde3ea; }
+
+    .content-col {
+      flex: 1;
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      padding: 12px 16px 16px;
+      gap: 10px;
+      overflow: hidden;
+    }
+
+    .filter-card {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px 16px;
+    }
+    .filter-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+      gap: 10px 16px;
+      align-items: end;
+    }
+    .field label { display: block; font-size: 12px; color: var(--text-sec); margin-bottom: 4px; }
+    .field input, .field select {
+      width: 100%;
+      padding: 6px 10px;
+      border: 1px solid #d9d9d9;
+      border-radius: var(--radius);
+      font-size: 13px;
+    }
+    .field-inline { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+    .filter-actions { margin-top: 12px; display: flex; gap: 8px; flex-wrap: wrap; }
+
+    .view-strip {
+      margin-top: 12px;
+      padding-top: 12px;
+      border-top: 1px dashed var(--border);
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+    }
+    .view-strip strong { font-size: 13px; color: #595959; }
+
+    .tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+    .tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 2px 8px;
+      background: var(--blue-light);
+      color: var(--blue);
+      border-radius: 4px;
+      font-size: 12px;
+    }
+    .tag button { border: none; background: none; cursor: pointer; color: var(--blue); font-size: 14px; line-height: 1; }
+
+    .query-collapsed-bar {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 10px 14px;
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      font-size: 13px;
+      color: var(--text-sec);
+    }
+    .hidden { display: none !important; }
+
+    .action-bar {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 0;
+    }
+    .action-bar .spacer { flex: 1; min-width: 8px; }
+    .seg { display: inline-flex; border: 1px solid #d9d9d9; border-radius: var(--radius); overflow: hidden; }
+    .seg button {
+      padding: 5px 12px;
+      border: none;
+      background: #fff;
+      cursor: pointer;
+      font-size: 12px;
+    }
+    .seg button.is-active { background: var(--blue); color: #fff; }
+
+    /* 8 张节点卡 */
+    .node-bar {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
+      gap: 8px;
+    }
+    .node-card {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px 12px;
+      cursor: pointer;
+      transition: box-shadow 0.15s;
+    }
+    .node-card:hover { box-shadow: 0 2px 8px rgba(0,0,0,.06); }
+    .node-card.is-active { border-color: var(--blue); box-shadow: 0 0 0 1px var(--blue) inset; }
+    .node-card h4 {
+      margin: 0 0 6px;
+      font-size: 13px;
+      border-left: 3px solid var(--accent, var(--blue));
+      padding-left: 8px;
+    }
+    .node-card .stats { font-size: 12px; color: var(--text-sec); line-height: 1.5; }
+    .node-card .stats .w { color: #fa8c16; }
+    .node-card .stats .o { color: #f5222d; }
+    .acc-plan_review { --accent: #fa8c16; }
+    .acc-po_pending { --accent: #f5222d; }
+    .acc-po_inbound { --accent: #52c41a; }
+    .acc-shipment_send { --accent: #722ed1; }
+    .acc-in_transit { --accent: #13c2c2; }
+    .acc-warehouse_inbound { --accent: #c41d7f; }
+
+    .table-toolbar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .table-toolbar .hint { font-size: 12px; color: var(--text-sec); }
+
+    .list-wrap {
+      flex: 1;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+    .table-scroll { flex: 1; min-height: 200px; overflow: auto; }
+    table.data-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+    table.data-table th, table.data-table td {
+      border: 1px solid #f0f0f0;
+      padding: 8px 10px;
+      text-align: left;
+    }
+    table.data-table th {
+      background: #fafafa;
+      font-weight: 600;
+      white-space: nowrap;
+    }
+    table.data-table tr:nth-child(even) { background: #fafafa; }
+    table.data-table tbody tr { cursor: pointer; }
+    table.data-table tbody tr:hover { background: #e6f7ff !important; }
+    .cell-op a { color: var(--blue); text-decoration: none; }
+    .badge { display: inline-block; padding: 0 6px; border-radius: 4px; font-size: 12px; background: #f0f0f0; color: #595959; }
+
+    /* 进度行（简化 ListingProductRow） */
+    .progress-list { padding: 0; }
+    .prow {
+      display: grid;
+      grid-template-columns: 36px 56px 1fr minmax(200px, 2fr);
+      gap: 10px;
+      padding: 12px;
+      border-bottom: 1px solid var(--border);
+      align-items: start;
+    }
+    .prow:hover { background: #f5f5f5; }
+    .prow-thumb {
+      width: 48px;
+      height: 48px;
+      background: #f0f0f0;
+      border-radius: 4px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 11px;
+      color: var(--text-sec);
+    }
+    .prow-title { font-weight: 600; margin-bottom: 4px; }
+    .prow-sub { font-size: 12px; color: var(--text-sec); }
+    .mini-tl { display: flex; gap: 4px; flex-wrap: wrap; align-items: center; }
+    .mini-tl span {
+      font-size: 11px;
+      padding: 2px 6px;
+      border-radius: 4px;
+      background: #f5f5f5;
+      color: #8c8c8c;
+    }
+    .mini-tl span.done { background: #f6ffed; color: #52c41a; }
+    .mini-tl span.cur { background: var(--blue-light); color: var(--blue); }
+
+    /* 明细行：默认 3 条，展开全部 */
+    .detail-block {
+      margin-top: 8px;
+      padding: 8px 10px;
+      background: #fafafa;
+      border-radius: 4px;
+      font-size: 12px;
+      color: #595959;
+      line-height: 1.6;
+    }
+    .detail-block li { margin: 2px 0; }
+    .detail-block:not(.expanded) li.more { display: none; }
+    .toggle-detail {
+      margin-top: 6px;
+      border: none;
+      background: none;
+      color: var(--blue);
+      cursor: pointer;
+      font-size: 12px;
+      padding: 0;
+    }
+
+    .pagination-bar {
+      flex-shrink: 0;
+      padding: 10px 12px;
+      border-top: 1px solid var(--border);
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 12px;
+      font-size: 13px;
+    }
+    .pagination-bar select { padding: 4px 8px; border-radius: 4px; border: 1px solid #d9d9d9; }
+    .pagination-bar input[type="number"] { width: 52px; padding: 4px 6px; border: 1px solid #d9d9d9; border-radius: 4px; }
+    .page-btns button {
+      min-width: 32px;
+      padding: 4px 8px;
+      margin: 0 2px;
+      border: 1px solid #d9d9d9;
+      background: #fff;
+      cursor: pointer;
+      border-radius: 4px;
+    }
+    .page-btns button:disabled { opacity: .45; cursor: not-allowed; }
+    .page-btns button.cur { border-color: var(--blue); color: var(--blue); font-weight: 600; }
+
+    /* 列设置弹层 */
+    .modal-mask {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,.45);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+    }
+    .modal-mask.show { display: flex; }
+    .modal {
+      background: #fff;
+      border-radius: 8px;
+      padding: 16px 20px;
+      max-width: 420px;
+      width: 90%;
+      max-height: 80vh;
+      overflow: auto;
+      box-shadow: 0 4px 24px rgba(0,0,0,.12);
+    }
+    .modal h3 { margin: 0 0 12px; font-size: 16px; }
+    .modal .chk { margin: 8px 0; display: flex; align-items: center; gap: 8px; }
+
+    footer.proto-footer {
+      flex-shrink: 0;
+      padding: 8px 16px;
+      font-size: 12px;
+      color: var(--text-sec);
+      text-align: center;
+      border-top: 1px solid var(--border);
+      background: var(--card-bg);
+    }
+
+    @media (max-width: 992px) {
+      .erp-nav { width: 0; padding: 0; overflow: hidden; border: none; }
+      .phase-sidebar { width: 160px; flex-basis: 160px; }
+      .prow { grid-template-columns: 32px 48px 1fr; }
+      .prow .mini-tl { grid-column: 1 / -1; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app-root">
+    <nav class="erp-nav" aria-label="ERP 主导航">
+      <div class="erp-logo">发发 YXF</div>
+      <div class="erp-nav-title">上架</div>
+      <a href="#">上架跟踪</a>
+      <a href="#">开售商品</a>
+      <a href="#" class="active">上架跟踪（边栏）</a>
+      <a href="#">时效配置</a>
+    </nav>
+
+    <div class="main-col">
+      <div class="tab-strip" role="tablist" aria-label="多标签（原型）">
+        <button type="button" class="is-active" data-tab="listing">上架跟踪（边栏）</button>
+        <button type="button" data-tab="launched">开售商品</button>
+        <button type="button" data-tab="config">时效配置</button>
+      </div>
+
+      <header class="bc-header">
+        <span>上架</span> / <span class="bc-cur">上架跟踪（边栏）</span>
+      </header>
+
+      <div class="body-row">
+        <aside class="phase-sidebar" id="phaseSidebar" aria-label="主状态">
+          <!-- 由 JS 填充 -->
+        </aside>
+        <button type="button" class="edge-collapse" id="btnCollapsePhase" title="收起边栏">收起</button>
+        <div class="phase-rail hidden" id="phaseRail">
+          <button type="button" class="btn-default" id="btnExpandPhase">展开</button>
+        </div>
+
+        <div class="content-col">
+          <section class="filter-card" id="filterSection">
+            <div class="filter-grid">
+              <div class="field">
+                <label>搜索字段</label>
+                <select id="searchField">
+                  <option value="sku" selected>SKU</option>
+                  <option value="name">品名</option>
+                  <option value="msku">MSKU</option>
+                  <option value="asin">ASIN</option>
+                </select>
+              </div>
+              <div class="field" style="grid-column: span 2;">
+                <label>关键词（多值可用逗号分隔）</label>
+                <input type="text" id="searchKeyword" placeholder="输入关键词" />
+              </div>
+              <div class="field">
+                <label>店铺</label>
+                <select id="filterShop" multiple size="2">
+                  <option value="Amazon US">Amazon US</option>
+                  <option value="Amazon DE">Amazon DE</option>
+                </select>
+              </div>
+              <div class="field">
+                <label>品类</label>
+                <select id="filterCategory" multiple size="2">
+                  <option value="连衣裙">连衣裙</option>
+                  <option value="上衣">上衣</option>
+                </select>
+              </div>
+              <div class="field field-inline">
+                <label style="width:100%">时间字段 + 范围</label>
+                <select id="filterTimeField" style="width:140px">
+                  <option value="">不限</option>
+                  <option value="authTime">开发授权</option>
+                  <option value="listingUploadTime">Listing 上传</option>
+                </select>
+                <input type="date" id="dateStart" />
+                <span>—</span>
+                <input type="date" id="dateEnd" />
+              </div>
+            </div>
+            <div class="filter-actions">
+              <button type="button" class="btn-primary" id="btnSearch">查询</button>
+              <button type="button" class="btn-default" id="btnReset">重置</button>
+              <button type="button" class="btn-default" id="btnToggleQuery">收起查询区</button>
+            </div>
+            <div class="view-strip">
+              <strong>系统视图</strong>
+              <select id="activeView" style="padding:6px 10px;border-radius:4px;border:1px solid #d9d9d9;">
+                <option value="">选择已保存视图</option>
+                <option value="v1">【默认】日常跟进</option>
+                <option value="v2">本周待审</option>
+              </select>
+              <button type="button" class="btn-default" id="btnViewMenu">视图管理 ▾</button>
+            </div>
+            <div class="tags hidden" id="filterTags"></div>
+          </section>
+
+          <div class="query-collapsed-bar hidden" id="queryCollapsedBar">
+            <span>筛选条件与系统视图已收起</span>
+            <button type="button" class="btn-primary" id="btnExpandQuery" style="padding:4px 12px;font-size:12px">展开查询区</button>
+          </div>
+
+          <div class="action-bar">
+            <button type="button" class="btn-primary">批量维护上架信息</button>
+            <button type="button" class="btn-primary" style="opacity:.9">创建采购计划</button>
+            <button type="button" class="btn-default">AI 文案生成</button>
+            <button type="button" class="btn-default">导出</button>
+            <span class="spacer"></span>
+            <div class="seg" id="displayModeSeg">
+              <button type="button" data-mode="progress">进度</button>
+              <button type="button" data-mode="regular" class="is-active">列表</button>
+            </div>
+            <button type="button" class="btn-default" id="btnWarn" style="border-color:#fa8c16;color:#d46b08">
+              预警 <b id="warnNum">0</b> 件
+            </button>
+            <button type="button" class="btn-default" id="btnOver" style="border-color:#ffccc7;color:#cf1322">
+              超时 <b id="overNum">0</b> 件
+            </button>
+          </div>
+
+          <section class="node-bar hidden" id="nodeBar" aria-label="进行中节点"></section>
+
+          <div class="table-toolbar">
+            <span class="hint">列表模式：支持列显示设置；每行默认展示 3 条节点明细，可展开查看全部。</span>
+            <button type="button" class="btn-primary" id="btnColSettings" style="padding:4px 12px;font-size:12px">列显示设置</button>
+          </div>
+
+          <div class="list-wrap">
+            <div class="table-scroll" id="tableScroll">
+              <!-- regular / progress 由 JS 渲染 -->
+            </div>
+            <div class="pagination-bar">
+              <span>共 <b id="totalCount">0</b> 条</span>
+              <label>每页
+                <select id="pageSize">
+                  <option value="20">20</option>
+                  <option value="50" selected>50</option>
+                  <option value="100">100</option>
+                  <option value="200">200</option>
+                </select>
+                条
+              </label>
+              <div class="page-btns" id="pageBtns"></div>
+              <span>跳转到 <input type="number" id="pageJump" min="1" value="1" /> 页
+                <button type="button" class="btn-primary" id="btnJump" style="margin-left:6px;padding:4px 10px;font-size:12px">确定</button>
+              </span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <footer class="proto-footer">原型 · 无外链依赖 · 基于 PRD docs/prd/inventory-alert.md（上架跟踪-边栏）</footer>
+    </div>
+  </div>
+
+  <!-- 列设置 -->
+  <div class="modal-mask" id="colModal" role="dialog" aria-modal="true" aria-labelledby="colModalTitle">
+    <div class="modal">
+      <h3 id="colModalTitle">列表列显示设置</h3>
+      <div id="colChecks"></div>
+      <div style="margin-top:16px;text-align:right">
+        <button type="button" class="btn-default" id="colCancel">取消</button>
+        <button type="button" class="btn-primary" id="colOk" style="margin-left:8px">确定</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 详情抽屉（简易） -->
+  <div class="modal-mask" id="detailModal">
+    <div class="modal" style="max-width:480px">
+      <h3>产品详情（示意）</h3>
+      <div id="detailBody" style="line-height:1.8;font-size:14px"></div>
+      <div style="margin-top:16px;text-align:right">
+        <button type="button" class="btn-primary" id="detailClose">关闭</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+(function () {
+  'use strict';
+
+  /** PRD：sidebarPhase 五档 + SIDEBAR_IN_PROGRESS_PANELS 八键 */
+  var PHASES = [
+    { key: 'all', label: '全部' },
+    { key: 'pending', label: '待分配' },
+    { key: 'stocking', label: '进行中' },
+    { key: 'ready', label: '可开售' },
+    { key: 'listed', label: '已开售' }
+  ];
+  var PANELS = [
+    { key: 'plan_pending', label: '待建计划' },
+    { key: 'plan_review', label: '计划待审' },
+    { key: 'po_pending', label: '待采购下单' },
+    { key: 'po_inbound', label: '待采购入库' },
+    { key: 'shipment_build', label: '待建货件' },
+    { key: 'shipment_send', label: '货件待发' },
+    { key: 'in_transit', label: '待入仓' },
+    { key: 'warehouse_inbound', label: '货件入仓' }
+  ];
+
+  var MOCK = [];
+  for (var i = 1; i <= 37; i++) {
+    var phases = ['pending', 'stocking', 'stocking', 'ready', 'listed'];
+    var main = phases[i % 5];
+    var nodes = ['pending', 'plan_pending', 'plan_review', 'po_inbound', 'ready_to_sell', 'listed_sale', 'shipment_send', 'in_transit'];
+    var sub = main === 'stocking' ? nodes[i % 8] : (main === 'pending' ? 'pending' : main === 'ready' ? 'ready_to_sell' : 'listed_sale');
+    MOCK.push({
+      id: i,
+      nameCn: '示例商品 ' + String(100 + i),
+      sku: 'SKU-' + String(1000 + i),
+      mainStatus: main,
+      subNode: sub,
+      category: i % 2 ? '连衣裙' : '上衣',
+      shop: i % 3 ? 'Amazon US' : 'Amazon DE',
+      authTime: '2026-0' + ((i % 9) + 1) + '-' + String((i % 27) + 1).padStart(2, '0'),
+      overdue: i % 11 === 0,
+      detailLines: [
+        '节点：已分配 → 待建计划（标准 3 天）',
+        '节点：待建计划 → 计划待审（标准 2 天）',
+        '节点：计划待审 → 待采购下单（当前）',
+        '节点：待采购下单 → 待采购入库',
+        '节点：待采购入库 → 待建货件',
+        '节点：待建货件 → 货件待发',
+        '节点：货件待发 → 待入仓',
+        '节点：待入仓 → 可开售'
+      ]
+    });
+  }
+
+  var state = {
+    sidebarPhase: 'stocking',
+    sidebarCollapsed: false,
+    queryCollapsed: false,
+    listDisplayMode: 'regular',
+    activeSubNode: '',
+    alertFilter: null,
+    currentPage: 1,
+    pageSize: 50,
+    expandedDetail: {},
+    colVisible: { sel: true, nameCn: true, sku: true, mainStatus: true, category: true, shop: true, authTime: true, op: true },
+    filterKeyword: '',
+    filterPhaseForCount: null
+  };
+
+  var LS = {
+    sidebar: 'listing_tracking_sidebar_collapsed',
+    query: 'listing_tracking_sidebar_query_collapsed',
+    display: 'listing_tracking_sidebar_display_mode'
+  };
+
+  function loadLs(key, def) {
+    try {
+      var v = localStorage.getItem(key);
+      return v === null ? def : v;
+    } catch (e) { return def; }
+  }
+  function saveLs(key, val) {
+    try { localStorage.setItem(key, val); } catch (e) {}
+  }
+
+  function counts() {
+    var c = { all: 0, pending: 0, stocking: 0, ready: 0, listed: 0 };
+    MOCK.forEach(function (p) {
+      c.all++;
+      c[p.mainStatus]++;
+    });
+    return c;
+  }
+
+  function filteredList() {
+    var list = MOCK.slice();
+    if (state.sidebarPhase !== 'all') {
+      list = list.filter(function (p) { return p.mainStatus === state.sidebarPhase; });
+    }
+    if (state.activeSubNode) {
+      list = list.filter(function (p) { return p.subNode === state.activeSubNode; });
+    }
+    if (state.filterKeyword.trim()) {
+      var kw = state.filterKeyword.trim().toLowerCase();
+      list = list.filter(function (p) {
+        return (p.nameCn + p.sku).toLowerCase().indexOf(kw) !== -1;
+      });
+    }
+    if (state.alertFilter === 'overdue') list = list.filter(function (p) { return p.overdue; });
+    if (state.alertFilter === 'warning') list = list.filter(function (p) { return !p.overdue && p.mainStatus === 'stocking'; });
+    return list;
+  }
+
+  function mainStatusLabel(m) {
+    var map = { pending: '待分配', stocking: '进行中', ready: '可开售', listed: '已开售' };
+    return map[m] || m;
+  }
+
+  function renderPhaseSidebar() {
+    var el = document.getElementById('phaseSidebar');
+    var rail = document.getElementById('phaseRail');
+    var btnC = document.getElementById('btnCollapsePhase');
+    var c = counts();
+    el.innerHTML = '';
+    PHASES.forEach(function (nav) {
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'phase-btn' + (state.sidebarPhase === nav.key ? ' is-active' : '');
+      b.textContent = nav.label + ' (' + (c[nav.key] != null ? c[nav.key] : 0) + ')';
+      b.onclick = function () {
+        state.sidebarPhase = nav.key;
+        state.activeSubNode = '';
+        state.currentPage = 1;
+        renderAll();
+      };
+      el.appendChild(b);
+    });
+    if (state.sidebarCollapsed) {
+      el.classList.add('hidden');
+      btnC.style.display = 'none';
+      rail.classList.remove('hidden');
+    } else {
+      el.classList.remove('hidden');
+      btnC.style.display = '';
+      rail.classList.add('hidden');
+    }
+  }
+
+  function renderNodeBar() {
+    var bar = document.getElementById('nodeBar');
+    if (state.sidebarPhase !== 'stocking') {
+      bar.classList.add('hidden');
+      bar.innerHTML = '';
+      return;
+    }
+    bar.classList.remove('hidden');
+    bar.innerHTML = '';
+    PANELS.forEach(function (pan) {
+      var stocking = MOCK.filter(function (p) { return p.mainStatus === 'stocking'; });
+      var inNode = stocking.filter(function (p) { return p.subNode === pan.key; });
+      var card = document.createElement('div');
+      card.className = 'node-card acc-' + pan.key + (state.activeSubNode === pan.key ? ' is-active' : '');
+      card.innerHTML =
+        '<h4>' + pan.label + '</h4>' +
+        '<div class="stats">共 <b>' + inNode.length + '</b>' +
+        ' <span class="w">预警 ' + Math.min(inNode.length, 2) + '</span>' +
+        ' <span class="o">超时 ' + inNode.filter(function (p) { return p.overdue; }).length + '</span></div>';
+      card.onclick = function () {
+        state.activeSubNode = state.activeSubNode === pan.key ? '' : pan.key;
+        state.currentPage = 1;
+        renderAll();
+      };
+      bar.appendChild(card);
+    });
+  }
+
+  function renderTable() {
+    var wrap = document.getElementById('tableScroll');
+    var list = filteredList();
+    var total = list.length;
+    var ps = state.pageSize;
+    var pages = Math.max(1, Math.ceil(total / ps));
+    if (state.currentPage > pages) state.currentPage = pages;
+    var start = (state.currentPage - 1) * ps;
+    var pageData = list.slice(start, start + ps);
+
+    document.getElementById('totalCount').textContent = total;
+    document.getElementById('warnNum').textContent = list.filter(function (p) { return !p.overdue && p.mainStatus === 'stocking'; }).length;
+    document.getElementById('overNum').textContent = list.filter(function (p) { return p.overdue; }).length;
+
+    if (state.listDisplayMode === 'regular') {
+      var cols = [];
+      if (state.colVisible.sel) cols.push({ k: 'sel', label: '', w: '40' });
+      if (state.colVisible.nameCn) cols.push({ k: 'nameCn', label: '品名', w: '' });
+      if (state.colVisible.sku) cols.push({ k: 'sku', label: 'SKU', w: '110' });
+      if (state.colVisible.mainStatus) cols.push({ k: 'mainStatus', label: '主状态', w: '88' });
+      if (state.colVisible.category) cols.push({ k: 'category', label: '品类', w: '88' });
+      if (state.colVisible.shop) cols.push({ k: 'shop', label: '店铺', w: '100' });
+      if (state.colVisible.authTime) cols.push({ k: 'authTime', label: '开发授权', w: '110' });
+      if (state.colVisible.op) cols.push({ k: 'op', label: '操作', w: '72' });
+
+      var html = '<table class="data-table"><thead><tr>';
+      cols.forEach(function (c) {
+        html += '<th' + (c.w ? ' style="width:' + c.w + 'px"' : '') + '>' + c.label + '</th>';
+      });
+      html += '</tr></thead><tbody>';
+
+      pageData.forEach(function (row) {
+        html += '<tr data-id="' + row.id + '">';
+        cols.forEach(function (c) {
+          if (c.k === 'sel') html += '<td><input type="checkbox" aria-label="选择" /></td>';
+          else if (c.k === 'mainStatus') html += '<td><span class="badge">' + mainStatusLabel(row.mainStatus) + '</span></td>';
+          else if (c.k === 'op') html += '<td class="cell-op"><a href="javascript:void(0)" class="js-detail" data-id="' + row.id + '">详情</a></td>';
+          else html += '<td>' + (row[c.k] != null ? String(row[c.k]) : '') + '</td>';
+        });
+        html += '</tr>';
+        var exp = !!state.expandedDetail[row.id];
+        var lines = row.detailLines || [];
+        var detailColspan = cols.length;
+        html += '<tr class="detail-row"><td colspan="' + detailColspan + '" style="background:#fafafa;border-top:none">';
+        html += '<div class="detail-block' + (exp ? ' expanded' : '') + '"><ul style="margin:0;padding-left:18px">';
+        lines.forEach(function (line, idx) {
+          html += '<li' + (idx >= 3 ? ' class="more"' : '') + '>' + line + '</li>';
+        });
+        if (lines.length > 3) {
+          html += '</ul><button type="button" class="toggle-detail js-toggle" data-id="' + row.id + '">' + (exp ? '收起' : '展开全部（共 ' + lines.length + ' 条）') + '</button>';
+        } else {
+          html += '</ul>';
+        }
+        html += '</div></td></tr>';
+      });
+
+      html += '</tbody></table>';
+      if (!pageData.length) {
+        html = '<div style="padding:48px;text-align:center;color:#8c8c8c">暂无数据（请调整筛选条件）</div>';
+      }
+      wrap.innerHTML = html;
+
+      wrap.querySelectorAll('.js-detail').forEach(function (a) {
+        a.onclick = function (e) {
+          e.stopPropagation();
+          var id = parseInt(a.getAttribute('data-id'), 10);
+          openDetail(MOCK.find(function (p) { return p.id === id; }));
+        };
+      });
+      wrap.querySelectorAll('.js-toggle').forEach(function (btn) {
+        btn.onclick = function (e) {
+          e.stopPropagation();
+          var id = parseInt(btn.getAttribute('data-id'), 10);
+          state.expandedDetail[id] = !state.expandedDetail[id];
+          renderTable();
+        };
+      });
+    } else {
+      var h = '<div class="progress-list">';
+      pageData.forEach(function (row) {
+        h += '<div class="prow">';
+        h += '<div><input type="checkbox" /></div>';
+        h += '<div class="prow-thumb">图</div>';
+        h += '<div><div class="prow-title">' + row.nameCn + '</div><div class="prow-sub">' + row.sku + ' · ' + row.shop + '</div>';
+        h += '<div class="detail-block" style="margin-top:8px"><ul style="margin:0;padding-left:18px">';
+        (row.detailLines || []).slice(0, 3).forEach(function (l) { h += '<li>' + l + '</li>'; });
+        h += '</ul></div></div>';
+        h += '<div class="mini-tl"><span class="done">已分配</span><span class="cur">进行中</span><span>待入库</span><span>可开售</span></div>';
+        h += '</div>';
+      });
+      h += '</div>';
+      if (!pageData.length) h = '<div style="padding:48px;text-align:center;color:#8c8c8c">暂无数据</div>';
+      wrap.innerHTML = h;
+    }
+
+    renderPagination(pages);
+  }
+
+  function renderPagination(pages) {
+    var cur = state.currentPage;
+    var el = document.getElementById('pageBtns');
+    el.innerHTML = '';
+    function addBtn(label, page, disabled, isCur) {
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.textContent = label;
+      b.disabled = !!disabled;
+      if (isCur) b.className = 'cur';
+      b.onclick = function () {
+        if (!disabled && page >= 1 && page <= pages) {
+          state.currentPage = page;
+          renderTable();
+        }
+      };
+      el.appendChild(b);
+    }
+    addBtn('上一页', cur - 1, cur <= 1, false);
+    var win = 5;
+    var start = Math.max(1, Math.min(cur - Math.floor(win / 2), pages - win + 1));
+    var end = Math.min(pages, start + win - 1);
+    if (start > 1) {
+      addBtn('1', 1, false, cur === 1);
+      if (start > 2) el.appendChild(document.createTextNode(' … '));
+    }
+    for (var p = start; p <= end; p++) {
+      addBtn(String(p), p, false, p === cur);
+    }
+    if (end < pages) {
+      if (end < pages - 1) el.appendChild(document.createTextNode(' … '));
+      addBtn(String(pages), pages, false, cur === pages);
+    }
+    addBtn('下一页', cur + 1, cur >= pages, false);
+    var jump = document.getElementById('pageJump');
+    jump.value = String(cur);
+    jump.setAttribute('max', String(pages));
+  }
+
+  function renderAll() {
+    renderPhaseSidebar();
+    renderNodeBar();
+    renderTable();
+  }
+
+  function openDetail(row) {
+    if (!row) return;
+    document.getElementById('detailBody').innerHTML =
+      '<p><strong>品名：</strong>' + row.nameCn + '</p>' +
+      '<p><strong>SKU：</strong>' + row.sku + '</p>' +
+      '<p><strong>主状态：</strong>' + mainStatusLabel(row.mainStatus) + '</p>' +
+      '<p style="color:#8c8c8c;font-size:12px;margin-top:12px">正式环境：ListingDetailDrawer 含时间轴与同筛选集切换（PRD F8）。</p>';
+    document.getElementById('detailModal').classList.add('show');
+  }
+
+  function initColModal() {
+    var keys = [
+      { k: 'sel', label: '勾选' },
+      { k: 'nameCn', label: '品名' },
+      { k: 'sku', label: 'SKU' },
+      { k: 'mainStatus', label: '主状态' },
+      { k: 'category', label: '品类' },
+      { k: 'shop', label: '店铺' },
+      { k: 'authTime', label: '开发授权' },
+      { k: 'op', label: '操作' }
+    ];
+    var box = document.getElementById('colChecks');
+    box.innerHTML = '';
+    keys.forEach(function (item) {
+      var d = document.createElement('div');
+      d.className = 'chk';
+      var cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.checked = !!state.colVisible[item.k];
+      cb.dataset.k = item.k;
+      d.appendChild(cb);
+      d.appendChild(document.createTextNode(' ' + item.label));
+      box.appendChild(d);
+    });
+  }
+
+  function applyColFromModal() {
+    document.querySelectorAll('#colChecks input[type=checkbox]').forEach(function (cb) {
+      state.colVisible[cb.dataset.k] = cb.checked;
+    });
+    document.getElementById('colModal').classList.remove('show');
+    renderTable();
+  }
+
+  // 事件
+  document.getElementById('btnSearch').onclick = function () {
+    state.filterKeyword = document.getElementById('searchKeyword').value;
+    state.currentPage = 1;
+    renderTable();
+  };
+  document.getElementById('btnReset').onclick = function () {
+    document.getElementById('searchKeyword').value = '';
+    state.filterKeyword = '';
+    state.sidebarPhase = 'all';
+    state.activeSubNode = '';
+    state.alertFilter = null;
+    state.currentPage = 1;
+    renderAll();
+  };
+  document.getElementById('btnCollapsePhase').onclick = function () {
+    state.sidebarCollapsed = true;
+    saveLs(LS.sidebar, '1');
+    renderPhaseSidebar();
+  };
+  document.getElementById('btnExpandPhase').onclick = function () {
+    state.sidebarCollapsed = false;
+    saveLs(LS.sidebar, '0');
+    renderPhaseSidebar();
+  };
+  document.getElementById('btnToggleQuery').onclick = function () {
+    state.queryCollapsed = true;
+    saveLs(LS.query, '1');
+    document.getElementById('filterSection').classList.add('hidden');
+    document.getElementById('queryCollapsedBar').classList.remove('hidden');
+  };
+  document.getElementById('btnExpandQuery').onclick = function () {
+    state.queryCollapsed = false;
+    saveLs(LS.query, '0');
+    document.getElementById('filterSection').classList.remove('hidden');
+    document.getElementById('queryCollapsedBar').classList.add('hidden');
+  };
+
+  document.getElementById('displayModeSeg').onclick = function (e) {
+    var t = e.target;
+    if (t.tagName !== 'BUTTON') return;
+    var mode = t.getAttribute('data-mode');
+    if (!mode) return;
+    state.listDisplayMode = mode;
+    saveLs(LS.display, mode === 'regular' ? 'regular' : 'progress');
+    Array.prototype.forEach.call(document.querySelectorAll('#displayModeSeg button'), function (b) {
+      b.classList.toggle('is-active', b.getAttribute('data-mode') === mode);
+    });
+    renderTable();
+  };
+
+  document.getElementById('btnWarn').onclick = function () {
+    state.alertFilter = state.alertFilter === 'warning' ? null : 'warning';
+    state.currentPage = 1;
+    renderTable();
+  };
+  document.getElementById('btnOver').onclick = function () {
+    state.alertFilter = state.alertFilter === 'overdue' ? null : 'overdue';
+    state.currentPage = 1;
+    renderTable();
+  };
+
+  document.getElementById('pageSize').onchange = function () {
+    state.pageSize = parseInt(document.getElementById('pageSize').value, 10);
+    state.currentPage = 1;
+    renderTable();
+  };
+  document.getElementById('btnJump').onclick = function () {
+    var p = parseInt(document.getElementById('pageJump').value, 10);
+    var list = filteredList();
+    var pages = Math.max(1, Math.ceil(list.length / state.pageSize));
+    if (p >= 1 && p <= pages) {
+      state.currentPage = p;
+      renderTable();
+    }
+  };
+
+  document.getElementById('btnColSettings').onclick = function () {
+    initColModal();
+    document.getElementById('colModal').classList.add('show');
+  };
+  document.getElementById('colCancel').onclick = function () {
+    document.getElementById('colModal').classList.remove('show');
+  };
+  document.getElementById('colOk').onclick = applyColFromModal;
+  document.getElementById('detailClose').onclick = function () {
+    document.getElementById('detailModal').classList.remove('show');
+  };
+
+  document.querySelectorAll('.tab-strip button').forEach(function (btn) {
+    btn.onclick = function () {
+      document.querySelectorAll('.tab-strip button').forEach(function (b) { b.classList.remove('is-active'); });
+      btn.classList.add('is-active');
+      alert('原型：多标签切换。正式路由：/listing/launched、/listing/config 等。');
+    };
+  });
+
+  // 恢复 localStorage
+  if (loadLs(LS.sidebar, '0') === '1') state.sidebarCollapsed = true;
+  if (loadLs(LS.query, '0') === '1') {
+    state.queryCollapsed = true;
+    document.getElementById('filterSection').classList.add('hidden');
+    document.getElementById('queryCollapsedBar').classList.remove('hidden');
+  }
+  var dm = loadLs(LS.display, 'regular');
+  state.listDisplayMode = dm === 'regular' ? 'regular' : 'progress';
+  Array.prototype.forEach.call(document.querySelectorAll('#displayModeSeg button'), function (b) {
+    b.classList.toggle('is-active', b.getAttribute('data-mode') === state.listDisplayMode);
+  });
+
+  renderAll();
+})();
+  </script>
+</body>
+</html>

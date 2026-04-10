@@ -2,25 +2,24 @@
 
 import { daysBetween } from '@/features/listing/useListingConfig.js'
 
-/** 时间轴 11 格：…待入仓 → 货件入仓(FBA已接收) → 可开售 → 已开售 */
+/** 时间轴 10 格：…待建货件 → 货件待发 → 待入仓 → 可开售 → 已开售（无「待物流提货」；已移除「货件入仓」独立节点） */
 export const SUB_NODES = [
-  { key: 'assigned',           label: '已分配' },
-  { key: 'plan_pending',       label: '待建计划' },
-  { key: 'plan_review',        label: '计划待审' },
-  { key: 'po_pending',         label: '待采购下单' },
-  { key: 'po_inbound',         label: '待采购入库' },
-  { key: 'shipment_build',     label: '待建货件' },
-  { key: 'shipment_send',      label: '货件待发' },
-  { key: 'in_transit',         label: '待入仓' },
-  { key: 'warehouse_received', label: '货件入仓' },
-  { key: 'ready_to_sell',      label: '可开售' },
-  { key: 'launched',           label: '已开售' },
+  { key: 'assigned',            label: '已分配' },
+  { key: 'plan_pending',        label: '待建计划' },
+  { key: 'plan_review',         label: '计划待审' },
+  { key: 'po_pending',          label: '待采购下单' },
+  { key: 'po_inbound',          label: '待采购入库' },
+  { key: 'shipment_build',      label: '待建货件' },
+  { key: 'shipment_send',       label: '货件待发' },
+  { key: 'in_transit',          label: '待入仓' },
+  { key: 'ready_to_sell',       label: '可开售' },
+  { key: 'launched',            label: '已开售' },
 ]
 
 /** 备货子阶段（不含已分配 / 不含可开售与已开售轴点） */
-export const STOCKING_FLOW_NODES = SUB_NODES.slice(1, 9)
+export const STOCKING_FLOW_NODES = SUB_NODES.slice(1, 8)
 
-/** 统计/筛选面板（货件入仓为时间轴真实节点，不重复） */
+/** 统计/筛选面板 */
 export const STOCKING_PANELS = [
   { key: 'pending', label: '待分配' },
   ...STOCKING_FLOW_NODES.map((n) => ({ key: n.key, label: n.label })),
@@ -29,6 +28,29 @@ export const STOCKING_PANELS = [
 ]
 
 export const STATUS_FILTER_OPTIONS = STOCKING_PANELS
+
+/** 上架跟踪页：不含待分配 / 已开售 */
+export const TRACKING_STOCKING_PANELS = STOCKING_PANELS.filter(
+  (o) => o.key !== 'pending' && o.key !== 'listed_sale',
+)
+export const TRACKING_STATUS_FILTER_OPTIONS = TRACKING_STOCKING_PANELS
+
+/** 开售商品页：仅已开售 */
+export const LISTED_SALE_PANELS = [{ key: 'listed_sale', label: '已开售' }]
+
+/**
+ * 上架跟踪（边栏）—「进行中」下 8 张卡片；「货件入仓」为独立业务键（见 matchSidebarWarehouseInbound）
+ */
+export const SIDEBAR_IN_PROGRESS_PANELS = [
+  { key: 'plan_pending', label: '待建计划' },
+  { key: 'plan_review', label: '计划待审' },
+  { key: 'po_pending', label: '待采购下单' },
+  { key: 'po_inbound', label: '待采购入库' },
+  { key: 'shipment_build', label: '待建货件' },
+  { key: 'shipment_send', label: '货件待发' },
+  { key: 'in_transit', label: '待入仓' },
+  { key: 'warehouse_inbound', label: '货件入仓' },
+]
 
 /** 统计卡片左侧色条（与节点 key 对应） */
 export const STOCKING_PANEL_ACCENTS = {
@@ -40,7 +62,7 @@ export const STOCKING_PANEL_ACCENTS = {
   shipment_build: '#409EFF',
   shipment_send: '#9254DE',
   in_transit: '#13C2C2',
-  warehouse_received: '#FA8C16',
+  warehouse_inbound: '#c41d7f',
   ready_to_sell: '#52C41A',
   listed_sale: '#303133',
 }
@@ -79,14 +101,14 @@ export function resolveListStatusLabel(p) {
 
 export function resolveMainStatus(p) {
   if (p.mainStatus === 'listed') return 'listed'
-  if (p.timeline?.[10]?.done === true) return 'listed'
+  if (p.timeline?.[9]?.done === true) return 'listed'
   if (p.mainStatus === 'ready') return 'ready'
   if (p.mainStatus === 'stocking') {
-    // 已进入可开售阶段：FBA货件入仓已完成、平面设计完成、尚未开售
+    // 待入仓完成 + 平面完成 → 主状态「可开售」
     if (
-      p.timeline?.[8]?.done === true &&
+      p.timeline?.[7]?.done === true &&
       p.designStatus === '完成平面设计' &&
-      p.timeline?.[10]?.done !== true
+      p.timeline?.[9]?.done !== true
     ) {
       return 'ready'
     }
@@ -95,18 +117,63 @@ export function resolveMainStatus(p) {
 }
 
 /**
+ * 上架跟踪列表应排除：待分配、已开售
+ */
+export function isExcludedFromListingTracking(p) {
+  const m = resolveMainStatus(p)
+  if (m === 'pending' || m === 'listed') return true
+  return false
+}
+
+/**
  * 列表「总用时」列：仅已开售展示「开售时间 − 运营分配时间」（已分配节点完成时间）；否则 "-/-"
  */
 export function formatListedTotalUseDays(p) {
   if (resolveMainStatus(p) !== 'listed') return '-/-'
   const assign = p.timeline?.[0]
-  const launched = p.timeline?.[10]
+  const launched = p.timeline?.[9]
   if (!assign?.done || !launched?.done || !assign?.time || !launched?.time) return '-/-'
   const start = assign.time.slice(0, 10)
   const end = launched.time.slice(0, 10)
   const n = daysBetween(start, end)
   if (n == null || Number.isNaN(n) || n < 0) return '-/-'
   return `${n}天`
+}
+
+/**
+ * 货件入仓（边栏）：已到亚马逊仓（时间轴「待入仓」节点已完成），但平面仍为「待平面设计」，无法进入可开售
+ */
+export function matchSidebarWarehouseInbound(p) {
+  if (resolveMainStatus(p) !== 'stocking') return false
+  if (p.designStatus !== '待平面设计') return false
+  if (p.timeline?.[9]?.done) return false
+  return p.timeline?.[7]?.done === true
+}
+
+/**
+ * 边栏「进行中」子面板：待入仓（与「货件入仓」互斥，避免重复计数）
+ */
+export function matchSidebarInTransitOnly(p) {
+  if (matchSidebarWarehouseInbound(p)) return false
+  return matchStatusPanelKey(p, 'in_transit')
+}
+
+/**
+ * 边栏「进行中」8 张卡片（含 warehouse_inbound）
+ */
+export function matchSidebarInProgressPanelKey(p, key) {
+  if (key === 'warehouse_inbound') return matchSidebarWarehouseInbound(p)
+  if (key === 'in_transit') return matchSidebarInTransitOnly(p)
+  const flowKeys = [
+    'plan_pending',
+    'plan_review',
+    'po_pending',
+    'po_inbound',
+    'shipment_build',
+    'shipment_send',
+  ]
+  if (flowKeys.includes(key)) return matchStatusPanelKey(p, key)
+  return false
 }
 
 /**
@@ -117,9 +184,6 @@ export function matchStatusPanelKey(p, key) {
   if (key === 'pending') return m === 'pending'
   if (key === 'listed_sale') return m === 'listed'
   if (key === 'ready_to_sell') return m === 'ready'
-  if (key === 'warehouse_received') {
-    return m === 'stocking' && p.subNode === 'warehouse_received'
-  }
   if (STOCKING_FLOW_NODES.some((n) => n.key === key)) {
     return m === 'stocking' && p.subNode === key
   }
@@ -141,7 +205,6 @@ const EST_LABELS = {
   po_inbound:         '预计入库',
   shipment_send:      '预计发出',
   in_transit:         '预计入仓',
-  warehouse_received: '预计FBA接收',
   ready_to_sell:      '预计可售',
   launched:           '预计开售',
 }
